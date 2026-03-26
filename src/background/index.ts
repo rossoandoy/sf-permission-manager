@@ -1,9 +1,18 @@
 /**
  * Service Worker エントリポイント
- * Popup/Content Script からのメッセージをルーティングする
+ * sf-custom-config-tool と同じ認証パターン:
+ * - Background はCookie取得のみ（API呼び出しなし）
+ * - Popup側がホスト名を渡してセッションを取得
  */
 
-import { getSession, getSessionForHost } from "./sf-session";
+import {
+  getSfHostFromUrl,
+  getSessionCookie,
+  checkConnectionStatus,
+  buildSessionFromCookie,
+  enrichSession,
+  toApiHostname,
+} from "./sf-session";
 import {
   query,
   toolingQuery,
@@ -57,23 +66,28 @@ import type {
 // --- メッセージ型定義 ---
 
 type BackgroundMessage =
-  | { type: "GET_SESSION" }
-  | { type: "GET_PERMISSION_SETS" }
+  | { type: "GET_SF_HOST"; url: string }
+  | { type: "GET_SESSION"; hostname: string }
+  | { type: "GET_STATUS" }
+  | { type: "GET_PERMISSION_SETS"; hostname: string }
   | {
       type: "GET_FIELD_PERMISSIONS";
+      hostname: string;
       objectApiName: string;
       permissionSetIds: string[];
     }
   | {
       type: "GET_OBJECT_PERMISSIONS";
+      hostname: string;
       objectApiName: string;
       permissionSetIds: string[];
     }
-  | { type: "GET_FIELD_DEFINITIONS"; objectApiName: string }
-  | { type: "GET_ENTITY_DEFINITIONS" }
-  | { type: "UPDATE_FIELD_PERMISSIONS"; changes: BulkPermissionChange[] }
+  | { type: "GET_FIELD_DEFINITIONS"; hostname: string; objectApiName: string }
+  | { type: "GET_ENTITY_DEFINITIONS"; hostname: string }
+  | { type: "UPDATE_FIELD_PERMISSIONS"; hostname: string; changes: BulkPermissionChange[] }
   | { type: "CLEAR_CACHE"; prefix?: string }
-  | { type: "SF_HOST_DETECTED"; sfHost: string };
+  | { type: "SF_HOST_DETECTED"; sfHost: string; currentObjectApiName?: string }
+  | { type: "GET_DETECTED_OBJECT" };
 
 export type { BackgroundMessage };
 
@@ -105,36 +119,44 @@ chrome.runtime.onMessage.addListener(
           });
         }
       });
-    return true; // 非同期レスポンスを示す
+    return true;
   },
 );
 
 async function handleMessage(message: BackgroundMessage): Promise<unknown> {
   switch (message.type) {
+    case "GET_SF_HOST":
+      return { sfHost: getSfHostFromUrl(message.url) };
     case "GET_SESSION":
-      return handleGetSession();
+      return handleGetSession(message.hostname);
+    case "GET_STATUS":
+      return checkConnectionStatus();
     case "GET_PERMISSION_SETS":
-      return handleGetPermissionSets();
+      return handleGetPermissionSets(message.hostname);
     case "GET_FIELD_PERMISSIONS":
       return handleGetFieldPermissions(
+        message.hostname,
         message.objectApiName,
         message.permissionSetIds,
       );
     case "GET_OBJECT_PERMISSIONS":
       return handleGetObjectPermissions(
+        message.hostname,
         message.objectApiName,
         message.permissionSetIds,
       );
     case "GET_FIELD_DEFINITIONS":
-      return handleGetFieldDefinitions(message.objectApiName);
+      return handleGetFieldDefinitions(message.hostname, message.objectApiName);
     case "GET_ENTITY_DEFINITIONS":
-      return handleGetEntityDefinitions();
+      return handleGetEntityDefinitions(message.hostname);
     case "UPDATE_FIELD_PERMISSIONS":
-      return handleUpdateFieldPermissions(message.changes);
+      return handleUpdateFieldPermissions(message.hostname, message.changes);
     case "CLEAR_CACHE":
       return handleClearCache(message.prefix);
     case "SF_HOST_DETECTED":
-      return handleSfHostDetected(message.sfHost);
+      return handleSfHostDetected(message.sfHost, message.currentObjectApiName);
+    case "GET_DETECTED_OBJECT":
+      return handleGetDetectedObject();
     default:
       throw new Error(
         `不明なメッセージタイプ: ${(message as { type: string }).type}`,
@@ -142,26 +164,35 @@ async function handleMessage(message: BackgroundMessage): Promise<unknown> {
   }
 }
 
-// --- 各ハンドラ実装 ---
+// --- セッション関連（シンプル: Cookie取得のみ） ---
 
-/** セッションが必要な操作の前提チェック */
-async function requireSession(): Promise<SfSession> {
-  const session = await getSession();
-  if (!session) {
+async function handleGetSession(
+  hostname: string,
+): Promise<{ sessionId: string; hostname: string } | { error: string }> {
+  const result = await getSessionCookie(hostname);
+  if (!result) {
+    return { error: "sid cookie が見つかりません。Salesforce にログインしてください。" };
+  }
+  return result;
+}
+
+/** ホスト名からSfSessionを構築してAPI呼び出しに使用 */
+async function requireSession(hostname: string): Promise<SfSession> {
+  const cookieResult = await getSessionCookie(hostname);
+  if (!cookieResult) {
     throw new SfSessionExpiredError();
   }
-  return session;
+  const session = buildSessionFromCookie(cookieResult.hostname, cookieResult.sessionId);
+  // orgIdを非同期で取得（キャッシュキーに使用するため）
+  return enrichSession(session);
 }
 
-async function handleGetSession(): Promise<SfSession | null> {
-  return getSession();
-}
+// --- データ取得ハンドラ ---
 
-async function handleGetPermissionSets(): Promise<PermissionSetInfo[]> {
-  const session = await requireSession();
-  const cacheKey = buildCacheKey(session.orgId, "permissionSets", "all");
+async function handleGetPermissionSets(hostname: string): Promise<PermissionSetInfo[]> {
+  const session = await requireSession(hostname);
+  const cacheKey = buildCacheKey(session.orgId || hostname, "permissionSets", "all");
 
-  // キャッシュ確認
   const cached = await cacheGet<PermissionSetInfo[]>(cacheKey);
   if (cached) return cached;
 
@@ -173,12 +204,13 @@ async function handleGetPermissionSets(): Promise<PermissionSetInfo[]> {
 }
 
 async function handleGetFieldPermissions(
+  hostname: string,
   objectApiName: string,
   permissionSetIds: string[],
 ): Promise<FieldPermissionEntry[]> {
-  const session = await requireSession();
+  const session = await requireSession(hostname);
   const cacheKey = buildCacheKey(
-    session.orgId,
+    session.orgId || hostname,
     "fieldPerms",
     `${objectApiName}:${permissionSetIds.sort().join(",")}`,
   );
@@ -195,12 +227,13 @@ async function handleGetFieldPermissions(
 }
 
 async function handleGetObjectPermissions(
+  hostname: string,
   objectApiName: string,
   permissionSetIds: string[],
 ): Promise<ObjectPermissionEntry[]> {
-  const session = await requireSession();
+  const session = await requireSession(hostname);
   const cacheKey = buildCacheKey(
-    session.orgId,
+    session.orgId || hostname,
     "objPerms",
     `${objectApiName}:${permissionSetIds.sort().join(",")}`,
   );
@@ -217,11 +250,12 @@ async function handleGetObjectPermissions(
 }
 
 async function handleGetFieldDefinitions(
+  hostname: string,
   objectApiName: string,
 ): Promise<FieldInfo[]> {
-  const session = await requireSession();
+  const session = await requireSession(hostname);
   const cacheKey = buildCacheKey(
-    session.orgId,
+    session.orgId || hostname,
     "fieldDefs",
     objectApiName,
   );
@@ -237,9 +271,9 @@ async function handleGetFieldDefinitions(
   return mapped;
 }
 
-async function handleGetEntityDefinitions(): Promise<ObjectInfo[]> {
-  const session = await requireSession();
-  const cacheKey = buildCacheKey(session.orgId, "entities", "all");
+async function handleGetEntityDefinitions(hostname: string): Promise<ObjectInfo[]> {
+  const session = await requireSession(hostname);
+  const cacheKey = buildCacheKey(session.orgId || hostname, "entities", "all");
 
   const cached = await cacheGet<ObjectInfo[]>(cacheKey);
   if (cached) return cached;
@@ -255,9 +289,10 @@ async function handleGetEntityDefinitions(): Promise<ObjectInfo[]> {
 }
 
 async function handleUpdateFieldPermissions(
+  hostname: string,
   changes: BulkPermissionChange[],
 ): Promise<PermissionChangeResult> {
-  const session = await requireSession();
+  const session = await requireSession(hostname);
   const grouped = groupChangesForApi(changes);
 
   const updates: { Id: string; PermissionsRead?: boolean; PermissionsEdit?: boolean }[] = [];
@@ -265,7 +300,6 @@ async function handleUpdateFieldPermissions(
 
   for (const entry of grouped.values()) {
     if (entry.id) {
-      // 既存レコード更新
       const rec: { Id: string; PermissionsRead?: boolean; PermissionsEdit?: boolean } = {
         Id: entry.id,
       };
@@ -273,7 +307,6 @@ async function handleUpdateFieldPermissions(
       if (entry.edit !== undefined) rec.PermissionsEdit = entry.edit;
       updates.push(rec);
     } else {
-      // 新規レコード作成
       creates.push({
         ParentId: entry.psId,
         SobjectType: entry.obj,
@@ -287,13 +320,8 @@ async function handleUpdateFieldPermissions(
   const errors: PermissionChangeResult["errors"] = [];
   let successCount = 0;
 
-  // バッチ更新
   if (updates.length > 0) {
-    const updateResults = await collectionUpdate(
-      session,
-      "FieldPermissions",
-      updates,
-    );
+    const updateResults = await collectionUpdate(session, "FieldPermissions", updates);
     for (let i = 0; i < updateResults.length; i++) {
       const r = updateResults[i];
       if (r && r.success) {
@@ -309,13 +337,8 @@ async function handleUpdateFieldPermissions(
     }
   }
 
-  // バッチ作成
   if (creates.length > 0) {
-    const createResults = await collectionCreate(
-      session,
-      "FieldPermissions",
-      creates,
-    );
+    const createResults = await collectionCreate(session, "FieldPermissions", creates);
     for (let i = 0; i < createResults.length; i++) {
       const r = createResults[i];
       if (r && r.success) {
@@ -331,9 +354,8 @@ async function handleUpdateFieldPermissions(
     }
   }
 
-  // 権限キャッシュを無効化
-  await cacheDeleteByPrefix(`sf:${session.orgId}:fieldPerms:`);
-  await cacheDeleteByPrefix(`sf:${session.orgId}:objPerms:`);
+  await cacheDeleteByPrefix(`sf:${session.orgId || hostname}:fieldPerms:`);
+  await cacheDeleteByPrefix(`sf:${session.orgId || hostname}:objPerms:`);
 
   return {
     success: errors.length === 0,
@@ -344,9 +366,7 @@ async function handleUpdateFieldPermissions(
   };
 }
 
-async function handleClearCache(
-  prefix?: string,
-): Promise<{ cleared: boolean }> {
+async function handleClearCache(prefix?: string): Promise<{ cleared: boolean }> {
   if (prefix) {
     await cacheDeleteByPrefix(prefix);
   } else {
@@ -357,10 +377,18 @@ async function handleClearCache(
 
 async function handleSfHostDetected(
   sfHost: string,
+  currentObjectApiName?: string,
 ): Promise<{ ok: boolean }> {
-  // セッション情報をキャッシュに保持
-  await getSessionForHost(sfHost);
-  // 最後に検出したホストを保存
-  await chrome.storage.local.set({ lastSfHost: sfHost });
+  const apiHost = toApiHostname(sfHost);
+  const data: Record<string, string> = { lastSfHost: apiHost };
+  if (currentObjectApiName) {
+    data.lastDetectedObject = currentObjectApiName;
+  }
+  await chrome.storage.local.set(data);
   return { ok: true };
+}
+
+async function handleGetDetectedObject(): Promise<{ objectApiName: string | null }> {
+  const result = await chrome.storage.local.get("lastDetectedObject");
+  return { objectApiName: (result.lastDetectedObject as string) ?? null };
 }

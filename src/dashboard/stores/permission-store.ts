@@ -38,6 +38,8 @@ export interface PermissionState {
   objectPermissions: Record<string, ObjectPermissionEntry>;
 
   // UI
+  activeTab: "matrix" | "gaps" | "diff";
+  detectedObjectApiName: string | null;
   loading: boolean;
   loadingMessage: string | null;
 
@@ -58,6 +60,8 @@ export const initialPermissionState: PermissionState = {
   fields: [],
   fieldPermissions: {},
   objectPermissions: {},
+  activeTab: "matrix",
+  detectedObjectApiName: null,
   loading: false,
   loadingMessage: null,
   pendingChanges: {},
@@ -87,6 +91,8 @@ export type PermissionAction =
       type: "SET_OBJECT_PERMISSIONS";
       objectPermissions: Record<string, ObjectPermissionEntry>;
     }
+  | { type: "SET_ACTIVE_TAB"; tab: PermissionState["activeTab"] }
+  | { type: "SET_DETECTED_OBJECT"; objectApiName: string | null }
   | { type: "SET_LOADING"; loading: boolean; message?: string }
   | { type: "TOGGLE_PERMISSION"; changeKey: string; newValue: boolean }
   | { type: "CLEAR_PENDING" }
@@ -153,6 +159,12 @@ export function permissionReducer(
 
     case "SET_OBJECT_PERMISSIONS":
       return { ...state, objectPermissions: action.objectPermissions };
+
+    case "SET_ACTIVE_TAB":
+      return { ...state, activeTab: action.tab };
+
+    case "SET_DETECTED_OBJECT":
+      return { ...state, detectedObjectApiName: action.objectApiName };
 
     case "SET_LOADING":
       return {

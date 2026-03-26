@@ -1,6 +1,6 @@
 /**
  * 権限データ管理フック
- * オブジェクト選択後のフィールド権限取得・変更・保存を担当
+ * ホスト名を各APIコールに渡す
  */
 
 import { useEffect, useCallback, useMemo } from "react";
@@ -9,7 +9,7 @@ import {
   getFieldPermissions,
   getObjectPermissions,
   updateFieldPermissions,
-} from "../lib/messaging";
+} from "../../lib/messaging";
 import {
   buildFieldPermissionMatrix,
   buildBulkChanges,
@@ -18,6 +18,7 @@ import type { PermissionMatrix } from "../../types/permissions";
 
 export function usePermissions() {
   const { state, dispatch } = usePermissionStore();
+  const hostname = state.session?.sfHost ?? null;
 
   const {
     selectedObjectApiName,
@@ -33,6 +34,7 @@ export function usePermissions() {
   // フィールドが読み込まれたら権限データを取得
   useEffect(() => {
     if (
+      !hostname ||
       !selectedObjectApiName ||
       selectedPermissionSetIds.length === 0 ||
       fields.length === 0
@@ -47,15 +49,13 @@ export function usePermissions() {
       });
       try {
         const [fieldPerms, objPerms] = await Promise.all([
-          getFieldPermissions(selectedObjectApiName, selectedPermissionSetIds),
-          getObjectPermissions(selectedObjectApiName, selectedPermissionSetIds),
+          getFieldPermissions(hostname, selectedObjectApiName, selectedPermissionSetIds),
+          getObjectPermissions(hostname, selectedObjectApiName, selectedPermissionSetIds),
         ]);
 
-        // フィールド権限をマトリクス形式に変換
         const matrix = buildFieldPermissionMatrix(fieldPerms);
         dispatch({ type: "SET_FIELD_PERMISSIONS", fieldPermissions: matrix });
 
-        // オブジェクト権限をマップ形式に変換
         const objPermMap: Record<string, (typeof objPerms)[0]> = {};
         for (const perm of objPerms) {
           objPermMap[perm.permissionSetId] = perm;
@@ -72,9 +72,8 @@ export function usePermissions() {
     };
 
     void load();
-  }, [selectedObjectApiName, selectedPermissionSetIds, fields, dispatch]);
+  }, [hostname, selectedObjectApiName, selectedPermissionSetIds, fields, dispatch]);
 
-  // 権限トグル
   const togglePermission = useCallback(
     (
       fieldQualifiedName: string,
@@ -82,11 +81,8 @@ export function usePermissions() {
       permission: "read" | "edit",
     ) => {
       const changeKey = `${fieldQualifiedName}:${permissionSetId}:${permission}`;
-
-      // 現在の値を確認（pending > existing > false）
       const existingPending = pendingChanges[changeKey];
       if (existingPending !== undefined) {
-        // 既にpendingの場合はトグル
         dispatch({
           type: "TOGGLE_PERMISSION",
           changeKey,
@@ -109,19 +105,18 @@ export function usePermissions() {
     [pendingChanges, fieldPermissions, dispatch],
   );
 
-  // 保存
   const saveChanges = useCallback(async () => {
-    if (Object.keys(pendingChanges).length === 0) return;
+    if (!hostname || Object.keys(pendingChanges).length === 0) return;
 
     dispatch({ type: "SET_SAVING", saving: true });
     try {
       const changes = buildBulkChanges(pendingChanges, fieldPermissions);
-      const result = await updateFieldPermissions(changes);
+      const result = await updateFieldPermissions(hostname, changes);
       dispatch({ type: "SET_SAVE_RESULT", result });
 
-      // 成功時は権限データをリロード
       if (result.success && selectedObjectApiName) {
         const fieldPerms = await getFieldPermissions(
+          hostname,
           selectedObjectApiName,
           selectedPermissionSetIds,
         );
@@ -148,6 +143,7 @@ export function usePermissions() {
       });
     }
   }, [
+    hostname,
     pendingChanges,
     fieldPermissions,
     selectedObjectApiName,
@@ -155,12 +151,10 @@ export function usePermissions() {
     dispatch,
   ]);
 
-  // 変更をキャンセル
   const cancelChanges = useCallback(() => {
     dispatch({ type: "CLEAR_PENDING" });
   }, [dispatch]);
 
-  // マトリクスデータ構築
   const matrix: PermissionMatrix | null = useMemo(() => {
     if (!selectedObjectApiName || fields.length === 0) return null;
 

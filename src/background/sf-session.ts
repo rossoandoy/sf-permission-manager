@@ -1,185 +1,179 @@
 /**
  * Salesforce セッション管理
- * SF Inspector Reloaded と同じ方式でセッションCookieを再利用
+ * SF Inspector Reloaded / sf-custom-config-tool と同じ方式でセッションCookieを再利用
+ *
+ * 方針: Background はシンプルにCookie取得のみ。API検証はしない。
  */
 
 import type { SfSession } from "../types/salesforce";
 
-/** SFドメインパターン */
-const SF_DOMAIN_PATTERNS = [
-  ".salesforce.com",
-  ".force.com",
-  ".my.salesforce.com",
-  ".lightning.force.com",
-];
-
 /**
- * 現在アクティブなSFタブからセッション情報を取得
+ * Lightning/VF ホスト名を My Domain API ホスト名に変換する
  */
-export async function getSession(): Promise<SfSession | null> {
-  // アクティブなSFタブを検索
-  const sfHost = await getActiveSfHost();
-  if (!sfHost) return null;
-
-  return getSessionForHost(sfHost);
-}
-
-/**
- * 指定ホストのセッション情報を取得
- */
-export async function getSessionForHost(sfHost: string): Promise<SfSession | null> {
-  // キャッシュ確認
-  const cached = await getCachedSession(sfHost);
-  if (cached) return cached;
-
-  // Cookie から sid を取得
-  const sid = await getSidCookie(sfHost);
-  if (!sid) return null;
-
-  // ユーザー情報を取得してセッション構築
-  const session = await buildSession(sfHost, sid);
-  if (session) {
-    await cacheSession(session);
+export function toApiHostname(hostname: string): string {
+  // Lightning ドメイン → My Domain
+  const lightningMatch = hostname.match(
+    /^(.+?)\.(?:(sandbox|develop|scratch)\.)?lightning\.force\.com$/i,
+  );
+  if (lightningMatch) {
+    const [, prefix, env] = lightningMatch;
+    return env
+      ? `${prefix}.${env}.my.salesforce.com`
+      : `${prefix}.my.salesforce.com`;
   }
 
-  return session;
+  // VisualForce ドメイン → My Domain
+  const vfMatch = hostname.match(
+    /^(.+?)(?:--[a-z0-9]+)?\.(?:vf|visualforce)\.(?:force\.)?com$/i,
+  );
+  if (vfMatch) {
+    const [, prefix] = vfMatch;
+    return `${prefix}.my.salesforce.com`;
+  }
+
+  return hostname;
 }
 
 /**
- * アクティブなSFタブのホスト名を取得
+ * URLからSalesforceホスト名を抽出する（API用に正規化済み）
+ * SF以外のURLの場合はnullを返す
  */
-async function getActiveSfHost(): Promise<string | null> {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  const activeTab = tabs[0];
-  if (!activeTab?.url) return null;
-
+export function getSfHostFromUrl(url: string): string | null {
   try {
-    const url = new URL(activeTab.url);
-    if (isSalesforceHost(url.hostname)) {
-      return url.hostname;
-    }
-  } catch {
-    // URL解析失敗
-  }
+    const parsed = new URL(url);
+    const { hostname } = parsed;
 
-  return null;
-}
-
-/**
- * ホスト名がSalesforceドメインかどうか判定
- */
-function isSalesforceHost(hostname: string): boolean {
-  return SF_DOMAIN_PATTERNS.some(pattern => hostname.endsWith(pattern));
-}
-
-/**
- * SFドメインの sid Cookie を取得
- */
-async function getSidCookie(sfHost: string): Promise<string | null> {
-  // Lightning ドメインの場合、対応するクラシックドメインからもCookieを探す
-  const hostsToCheck = [sfHost];
-
-  // my.salesforce.com → 対応する .salesforce.com も試す
-  if (sfHost.endsWith(".my.salesforce.com")) {
-    const orgDomain = sfHost.replace(".my.salesforce.com", ".salesforce.com");
-    hostsToCheck.push(orgDomain);
-  }
-
-  for (const host of hostsToCheck) {
-    const cookie = await chrome.cookies.get({
-      url: `https://${host}`,
-      name: "sid",
-    });
-    if (cookie?.value) return cookie.value;
-  }
-
-  return null;
-}
-
-/**
- * sid トークンを使ってセッション情報を構築
- */
-async function buildSession(sfHost: string, sid: string): Promise<SfSession | null> {
-  try {
-    // instanceUrl はホストから構築
-    const instanceUrl = `https://${sfHost}`;
-
-    // ユーザー情報取得で有効性を確認
-    const response = await fetch(
-      `${instanceUrl}/services/data/v62.0/chatter/users/me`,
-      {
-        headers: {
-          Authorization: `Bearer ${sid}`,
-          Accept: "application/json",
-        },
-      },
-    );
-
-    if (!response.ok) return null;
-
-    // セッション有効性確認（レスポンス自体は使用しない）
-    await response.json();
-
-    // ユーザーIDからorgIdを推定（先頭15文字の最初の部分）
-    // より正確にはIdentity URLから取得
-    const identityResponse = await fetch(
-      `${instanceUrl}/services/oauth2/userinfo`,
-      {
-        headers: { Authorization: `Bearer ${sid}` },
-      },
-    );
-
-    let orgId = "";
-    let userId = "";
-    if (identityResponse.ok) {
-      const identity = (await identityResponse.json()) as {
-        organization_id: string;
-        user_id: string;
-      };
-      orgId = identity.organization_id;
-      userId = identity.user_id;
+    if (
+      hostname.endsWith(".salesforce.com") ||
+      hostname.endsWith(".force.com")
+    ) {
+      return toApiHostname(hostname);
     }
 
-    return {
-      accessToken: sid,
-      instanceUrl,
-      userId,
-      orgId,
-      sfHost,
-    };
+    return null;
   } catch {
     return null;
   }
 }
 
-// --- キャッシュ ---
+/**
+ * 指定ホスト名のsid Cookieを取得する
+ * Background Service Worker内でのみ呼び出し可能
+ */
+export async function getSessionCookie(
+  hostname: string,
+): Promise<{ sessionId: string; hostname: string } | null> {
+  // まず指定ホストで直接取得
+  const url = `https://${hostname}`;
+  const cookie = await chrome.cookies.get({ url, name: "sid" });
 
-async function getCachedSession(sfHost: string): Promise<SfSession | null> {
-  const key = `session:${sfHost}`;
-  const result = await chrome.storage.session.get(key);
-  const cached = result[key] as (SfSession & { expiresAt: number }) | undefined;
+  if (cookie?.value) {
+    return { sessionId: cookie.value, hostname };
+  }
 
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached;
+  // フォールバック: 全SF sid cookieをスキャン
+  const allCookies = await chrome.cookies.getAll({ name: "sid" });
+  const sfCookie = allCookies.find(
+    (c) =>
+      c.domain.endsWith(".salesforce.com") ||
+      c.domain.endsWith(".force.com"),
+  );
+
+  if (sfCookie?.value) {
+    const cookieHost = sfCookie.domain.startsWith(".")
+      ? sfCookie.domain.slice(1)
+      : sfCookie.domain;
+    const apiHost = toApiHostname(cookieHost);
+    return { sessionId: sfCookie.value, hostname: apiHost };
   }
 
   return null;
 }
 
-async function cacheSession(session: SfSession): Promise<void> {
-  const key = `session:${session.sfHost}`;
-  await chrome.storage.session.set({
-    [key]: {
-      ...session,
-      expiresAt: Date.now() + 30 * 60 * 1000, // 30分TTL
-    },
-  });
+/**
+ * 接続状態チェック（sid Cookieの存在確認のみ、API呼び出しなし）
+ */
+export async function checkConnectionStatus(): Promise<{
+  connected: boolean;
+  hostname: string | null;
+}> {
+  // 保存済みホストを確認
+  const result = await chrome.storage.local.get("lastSfHost");
+  const lastHost = result.lastSfHost as string | undefined;
+
+  if (lastHost) {
+    const url = `https://${lastHost}`;
+    const cookie = await chrome.cookies.get({ url, name: "sid" });
+    if (cookie?.value) {
+      return { connected: true, hostname: lastHost };
+    }
+  }
+
+  // 全SF cookieスキャン
+  const allCookies = await chrome.cookies.getAll({ name: "sid" });
+  const sfCookie = allCookies.find((c) =>
+    c.domain.endsWith(".salesforce.com"),
+  );
+
+  if (sfCookie?.value) {
+    const cookieHost = sfCookie.domain.startsWith(".")
+      ? sfCookie.domain.slice(1)
+      : sfCookie.domain;
+    const hostname = toApiHostname(cookieHost);
+    await chrome.storage.local.set({ lastSfHost: hostname });
+    return { connected: true, hostname };
+  }
+
+  return { connected: false, hostname: null };
 }
 
 /**
- * セッションキャッシュをクリア
+ * ホスト名 + sid Cookie から SfSession を構築する
+ * orgId/userIdは後から /services/oauth2/userinfo で取得（popup側で非同期に）
  */
-export async function clearSession(sfHost: string): Promise<void> {
-  const key = `session:${sfHost}`;
-  await chrome.storage.session.remove(key);
+export function buildSessionFromCookie(
+  hostname: string,
+  sessionId: string,
+): SfSession {
+  return {
+    accessToken: sessionId,
+    instanceUrl: `https://${hostname}`,
+    userId: "",
+    orgId: "",
+    sfHost: hostname,
+  };
+}
+
+/**
+ * orgId / userId を非同期で取得して SfSession を完成させる
+ * 失敗してもセッション自体は使える（orgId/userIdが空のまま）
+ */
+export async function enrichSession(session: SfSession): Promise<SfSession> {
+  try {
+    const response = await fetch(
+      `${session.instanceUrl}/services/oauth2/userinfo`,
+      {
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          Accept: "application/json",
+        },
+      },
+    );
+
+    if (response.ok) {
+      const data = (await response.json()) as {
+        organization_id: string;
+        user_id: string;
+      };
+      return {
+        ...session,
+        orgId: data.organization_id,
+        userId: data.user_id,
+      };
+    }
+  } catch {
+    // 失敗してもセッションは使える
+  }
+
+  return session;
 }
