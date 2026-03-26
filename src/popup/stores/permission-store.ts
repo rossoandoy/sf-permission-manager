@@ -1,0 +1,231 @@
+/**
+ * 権限管理の状態管理（useReducer ベース）
+ */
+
+import {
+  createContext,
+  useContext,
+  useReducer,
+  type Dispatch,
+  type ReactNode,
+  createElement,
+} from "react";
+import type { SfSession } from "../../types/salesforce";
+import type {
+  PermissionSetInfo,
+  FieldPermissionEntry,
+  ObjectPermissionEntry,
+  FieldInfo,
+  ObjectInfo,
+  PermissionChangeResult,
+} from "../../types/permissions";
+
+// --- State ---
+
+export interface PermissionState {
+  // 接続
+  session: SfSession | null;
+  connectionStatus: "disconnected" | "connecting" | "connected" | "error";
+  connectionError: string | null;
+
+  // データ
+  permissionSets: PermissionSetInfo[];
+  selectedPermissionSetIds: string[];
+  objects: ObjectInfo[];
+  selectedObjectApiName: string | null;
+  fields: FieldInfo[];
+  fieldPermissions: Record<string, Record<string, FieldPermissionEntry>>;
+  objectPermissions: Record<string, ObjectPermissionEntry>;
+
+  // UI
+  loading: boolean;
+  loadingMessage: string | null;
+
+  // 変更追跡
+  pendingChanges: Record<string, boolean>;
+  saving: boolean;
+  lastSaveResult: PermissionChangeResult | null;
+}
+
+export const initialPermissionState: PermissionState = {
+  session: null,
+  connectionStatus: "disconnected",
+  connectionError: null,
+  permissionSets: [],
+  selectedPermissionSetIds: [],
+  objects: [],
+  selectedObjectApiName: null,
+  fields: [],
+  fieldPermissions: {},
+  objectPermissions: {},
+  loading: false,
+  loadingMessage: null,
+  pendingChanges: {},
+  saving: false,
+  lastSaveResult: null,
+};
+
+// --- Actions ---
+
+export type PermissionAction =
+  | { type: "SET_SESSION"; session: SfSession | null }
+  | {
+      type: "SET_CONNECTION_STATUS";
+      status: PermissionState["connectionStatus"];
+      error?: string;
+    }
+  | { type: "SET_PERMISSION_SETS"; permissionSets: PermissionSetInfo[] }
+  | { type: "SELECT_PERMISSION_SETS"; ids: string[] }
+  | { type: "SET_OBJECTS"; objects: ObjectInfo[] }
+  | { type: "SELECT_OBJECT"; objectApiName: string | null }
+  | { type: "SET_FIELDS"; fields: FieldInfo[] }
+  | {
+      type: "SET_FIELD_PERMISSIONS";
+      fieldPermissions: Record<string, Record<string, FieldPermissionEntry>>;
+    }
+  | {
+      type: "SET_OBJECT_PERMISSIONS";
+      objectPermissions: Record<string, ObjectPermissionEntry>;
+    }
+  | { type: "SET_LOADING"; loading: boolean; message?: string }
+  | { type: "TOGGLE_PERMISSION"; changeKey: string; newValue: boolean }
+  | { type: "CLEAR_PENDING" }
+  | { type: "SET_SAVING"; saving: boolean }
+  | { type: "SET_SAVE_RESULT"; result: PermissionChangeResult }
+  | { type: "RESET" };
+
+// --- Reducer ---
+
+export function permissionReducer(
+  state: PermissionState,
+  action: PermissionAction,
+): PermissionState {
+  switch (action.type) {
+    case "SET_SESSION":
+      return {
+        ...state,
+        session: action.session,
+        connectionStatus: action.session ? "connected" : "disconnected",
+        connectionError: null,
+      };
+
+    case "SET_CONNECTION_STATUS":
+      return {
+        ...state,
+        connectionStatus: action.status,
+        connectionError: action.error ?? null,
+      };
+
+    case "SET_PERMISSION_SETS":
+      return {
+        ...state,
+        permissionSets: action.permissionSets,
+        // 初回は全選択
+        selectedPermissionSetIds:
+          state.selectedPermissionSetIds.length === 0
+            ? action.permissionSets.map((ps) => ps.id)
+            : state.selectedPermissionSetIds,
+      };
+
+    case "SELECT_PERMISSION_SETS":
+      return { ...state, selectedPermissionSetIds: action.ids };
+
+    case "SET_OBJECTS":
+      return { ...state, objects: action.objects };
+
+    case "SELECT_OBJECT":
+      return {
+        ...state,
+        selectedObjectApiName: action.objectApiName,
+        // オブジェクト変更時にフィールド・権限・変更をリセット
+        fields: [],
+        fieldPermissions: {},
+        objectPermissions: {},
+        pendingChanges: {},
+        lastSaveResult: null,
+      };
+
+    case "SET_FIELDS":
+      return { ...state, fields: action.fields };
+
+    case "SET_FIELD_PERMISSIONS":
+      return { ...state, fieldPermissions: action.fieldPermissions };
+
+    case "SET_OBJECT_PERMISSIONS":
+      return { ...state, objectPermissions: action.objectPermissions };
+
+    case "SET_LOADING":
+      return {
+        ...state,
+        loading: action.loading,
+        loadingMessage: action.message ?? null,
+      };
+
+    case "TOGGLE_PERMISSION":
+      return {
+        ...state,
+        pendingChanges: {
+          ...state.pendingChanges,
+          [action.changeKey]: action.newValue,
+        },
+        lastSaveResult: null,
+      };
+
+    case "CLEAR_PENDING":
+      return { ...state, pendingChanges: {}, lastSaveResult: null };
+
+    case "SET_SAVING":
+      return { ...state, saving: action.saving };
+
+    case "SET_SAVE_RESULT":
+      return {
+        ...state,
+        saving: false,
+        lastSaveResult: action.result,
+        // 成功時は変更をクリア
+        pendingChanges: action.result.success ? {} : state.pendingChanges,
+      };
+
+    case "RESET":
+      return initialPermissionState;
+
+    default:
+      return state;
+  }
+}
+
+// --- Context ---
+
+interface PermissionContextValue {
+  state: PermissionState;
+  dispatch: Dispatch<PermissionAction>;
+}
+
+const PermissionContext = createContext<PermissionContextValue | null>(null);
+
+export function PermissionProvider({
+  children,
+}: {
+  children: ReactNode;
+}): ReactNode {
+  const [state, dispatch] = useReducer(
+    permissionReducer,
+    initialPermissionState,
+  );
+
+  return createElement(
+    PermissionContext.Provider,
+    { value: { state, dispatch } },
+    children,
+  );
+}
+
+export function usePermissionStore(): PermissionContextValue {
+  const ctx = useContext(PermissionContext);
+  if (!ctx) {
+    throw new Error(
+      "usePermissionStore は PermissionProvider 内で使用してください",
+    );
+  }
+  return ctx;
+}
