@@ -5,6 +5,7 @@ import { resolve } from "path";
 import manifest from "./public/manifest.json";
 
 export default defineConfig({
+  base: "./",
   plugins: [
     react(),
     crx({ manifest: manifest as Parameters<typeof crx>[0]["manifest"] }),
