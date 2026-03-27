@@ -36,7 +36,12 @@ export function useFieldMetadata() {
           dispatch({ type: "SET_DETECTED_OBJECT", objectApiName: detected.objectApiName });
         }
       } catch (err) {
-        console.debug("メタデータ取得エラー:", err);
+        console.error("メタデータ取得エラー:", err);
+        dispatch({
+          type: "SET_CONNECTION_STATUS",
+          status: "error",
+          error: err instanceof Error ? err.message : "データ取得に失敗しました",
+        });
       } finally {
         dispatch({ type: "SET_LOADING", loading: false });
       }

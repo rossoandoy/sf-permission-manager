@@ -10,7 +10,6 @@ import {
   getSessionCookie,
   checkConnectionStatus,
   buildSessionFromCookie,
-  enrichSession,
   toApiHostname,
 } from "./sf-session";
 import {
@@ -182,9 +181,9 @@ async function requireSession(hostname: string): Promise<SfSession> {
   if (!cookieResult) {
     throw new SfSessionExpiredError();
   }
-  const session = buildSessionFromCookie(cookieResult.hostname, cookieResult.sessionId);
-  // orgIdを非同期で取得（キャッシュキーに使用するため）
-  return enrichSession(session);
+  // enrichSession は呼ばない — orgId/userInfo 取得が遅い/失敗するとデータ取得全体がブロックされる
+  // キャッシュキーには hostname をフォールバックとして使用
+  return buildSessionFromCookie(cookieResult.hostname, cookieResult.sessionId);
 }
 
 // --- データ取得ハンドラ ---
