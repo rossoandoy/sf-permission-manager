@@ -244,6 +244,12 @@ export const MatrixView: FC<MatrixViewProps> = ({
             </tr>
           </thead>
           <tbody>
+            {/* オブジェクト権限 (CRUD) 行 */}
+            <ObjectPermissionRows
+              permissionSets={matrix.permissionSets}
+              objectPermissions={matrix.objectPermissions}
+            />
+
             {filteredFields.map((field) => (
               <tr
                 key={field.qualifiedApiName}
@@ -379,6 +385,83 @@ const PermCell: FC<PermCellProps> = ({ value, isPending, onClick }) => {
         </svg>
       )}
     </button>
+  );
+};
+
+// --- オブジェクト権限 (CRUD) 行 ---
+
+const CRUD_LABELS = [
+  { key: "create" as const, label: "Create", short: "C" },
+  { key: "read" as const, label: "Read", short: "R" },
+  { key: "edit" as const, label: "Edit", short: "U" },
+  { key: "delete" as const, label: "Delete", short: "D" },
+  { key: "viewAll" as const, label: "View All", short: "VA" },
+  { key: "modifyAll" as const, label: "Modify All", short: "MA" },
+];
+
+interface ObjectPermissionRowsProps {
+  permissionSets: { id: string }[];
+  objectPermissions: Record<string, import("../../types/permissions").ObjectPermissionEntry>;
+}
+
+const ObjectPermissionRows: FC<ObjectPermissionRowsProps> = ({
+  permissionSets,
+  objectPermissions,
+}) => {
+  return (
+    <>
+      {/* CRUD ヘッダー行 */}
+      <tr className="bg-zinc-800/60">
+        <td className="sticky left-0 z-[5] bg-zinc-800/60 px-3 py-1 border-b border-zinc-700/50">
+          <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+            オブジェクト権限 (CRUD)
+          </span>
+        </td>
+        {permissionSets.map((ps) => (
+          <td key={ps.id} className="border-b border-zinc-700/50" />
+        ))}
+      </tr>
+      {CRUD_LABELS.map((crud) => (
+        <tr key={crud.key} className="hover:bg-zinc-800/30">
+          <td className="sticky left-0 z-[5] bg-zinc-900 px-3 py-1 border-b border-zinc-800/30">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-medium text-zinc-400 w-5 text-center bg-zinc-700/50 rounded px-1">
+                {crud.short}
+              </span>
+              <span className="text-xs text-zinc-300">{crud.label}</span>
+            </div>
+          </td>
+          {permissionSets.map((ps) => {
+            const perm = objectPermissions[ps.id];
+            const value = perm ? perm[crud.key] : false;
+            return (
+              <td
+                key={ps.id}
+                className="px-1 py-1 border-b border-zinc-800/30 text-center"
+              >
+                <span
+                  className={`inline-block w-6 h-5 rounded text-center leading-5 text-[10px] font-bold ${
+                    value
+                      ? "bg-emerald-700/60 text-emerald-200"
+                      : "bg-zinc-700/40 text-zinc-600"
+                  }`}
+                  title={`${crud.label}: ${value ? "ON" : "OFF"}`}
+                >
+                  {value ? "✓" : "–"}
+                </span>
+              </td>
+            );
+          })}
+        </tr>
+      ))}
+      {/* CRUD とフィールドの区切り線 */}
+      <tr>
+        <td
+          colSpan={permissionSets.length + 1}
+          className="h-1 bg-zinc-700/30"
+        />
+      </tr>
+    </>
   );
 };
 
