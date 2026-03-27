@@ -31,16 +31,25 @@ export const ObjectSidebar: FC<ObjectSidebarProps> = ({
 }) => {
   const [objectFilter, setObjectFilter] = useState("");
   const [collapsed, setCollapsed] = useState(false);
+  const [sortBy, setSortBy] = useState<"label" | "apiName" | "fieldCount">("label");
 
   const filteredObjects = useMemo(() => {
-    if (!objectFilter) return objects;
-    const lower = objectFilter.toLowerCase();
-    return objects.filter(
-      (o) =>
-        o.apiName.toLowerCase().includes(lower) ||
-        o.label.toLowerCase().includes(lower),
-    );
-  }, [objects, objectFilter]);
+    let result = objects;
+    if (objectFilter) {
+      const lower = objectFilter.toLowerCase();
+      result = result.filter(
+        (o) =>
+          o.apiName.toLowerCase().includes(lower) ||
+          o.label.toLowerCase().includes(lower),
+      );
+    }
+    // ソート
+    return [...result].sort((a, b) => {
+      if (sortBy === "label") return a.label.localeCompare(b.label);
+      if (sortBy === "apiName") return a.apiName.localeCompare(b.apiName);
+      return b.fieldCount - a.fieldCount; // フィールド数は降順
+    });
+  }, [objects, objectFilter, sortBy]);
 
   // namespace グループ化
   const groupedObjects = useMemo(() => {
@@ -129,8 +138,19 @@ export const ObjectSidebar: FC<ObjectSidebarProps> = ({
               «
             </button>
           </div>
-          <div className="mt-1 text-[10px] text-zinc-500">
-            {filteredObjects.length} / {objects.length} objects
+          <div className="mt-1 flex items-center justify-between">
+            <span className="text-[10px] text-zinc-500">
+              {filteredObjects.length} / {objects.length} objects
+            </span>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as "label" | "apiName" | "fieldCount")}
+              className="text-[10px] bg-transparent text-zinc-500 border-none focus:outline-none cursor-pointer"
+            >
+              <option value="label">名前順</option>
+              <option value="apiName">API名順</option>
+              <option value="fieldCount">フィールド数順</option>
+            </select>
           </div>
         </div>
       )}

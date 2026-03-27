@@ -1,37 +1,29 @@
 /**
  * 差分比較タブ
- * permission-utils.ts の computeDiff を使用
+ * 全権限セットから2つを選んで比較
  */
 
 import { useState, useMemo, type FC } from "react";
 import { computeDiff } from "../../lib/permission-utils";
-import type { PermissionMatrix } from "../../types/permissions";
+import type { PermissionMatrix, PermissionSetInfo } from "../../types/permissions";
 
 interface DiffViewProps {
   matrix: PermissionMatrix | null;
+  /** グループに含まれる全権限セット（サイドバーの選択に関係なく） */
+  allPermissionSets: PermissionSetInfo[];
 }
 
-export const DiffView: FC<DiffViewProps> = ({ matrix }) => {
+export const DiffView: FC<DiffViewProps> = ({ matrix, allPermissionSets }) => {
   const [psAId, setPsAId] = useState<string>("");
   const [psBId, setPsBId] = useState<string>("");
 
-  const psA = matrix?.permissionSets.find((ps) => ps.id === psAId) ?? null;
-  const psB = matrix?.permissionSets.find((ps) => ps.id === psBId) ?? null;
+  const psA = allPermissionSets.find((ps) => ps.id === psAId) ?? null;
+  const psB = allPermissionSets.find((ps) => ps.id === psBId) ?? null;
 
   const diffs = useMemo(() => {
     if (!matrix || !psA || !psB || psA.id === psB.id) return [];
     return computeDiff(matrix.fields, psA, psB, matrix.fieldPermissions);
   }, [matrix, psA, psB]);
-
-  if (!matrix) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-sm text-zinc-500">
-          オブジェクトを選択すると差分比較ができます
-        </p>
-      </div>
-    );
-  }
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -41,10 +33,10 @@ export const DiffView: FC<DiffViewProps> = ({ matrix }) => {
         <select
           value={psAId}
           onChange={(e) => setPsAId(e.target.value)}
-          className="px-2 py-1 text-xs bg-zinc-800 border border-zinc-600/50 rounded text-zinc-200 focus:outline-none focus:border-violet-500/50"
+          className="px-2 py-1 text-xs bg-zinc-800 border border-zinc-600/50 rounded text-zinc-200 focus:outline-none focus:border-violet-500/50 max-w-[200px]"
         >
           <option value="">PS A を選択</option>
-          {matrix.permissionSets.map((ps) => (
+          {allPermissionSets.map((ps) => (
             <option key={ps.id} value={ps.id}>{ps.label}</option>
           ))}
         </select>
@@ -52,10 +44,10 @@ export const DiffView: FC<DiffViewProps> = ({ matrix }) => {
         <select
           value={psBId}
           onChange={(e) => setPsBId(e.target.value)}
-          className="px-2 py-1 text-xs bg-zinc-800 border border-zinc-600/50 rounded text-zinc-200 focus:outline-none focus:border-violet-500/50"
+          className="px-2 py-1 text-xs bg-zinc-800 border border-zinc-600/50 rounded text-zinc-200 focus:outline-none focus:border-violet-500/50 max-w-[200px]"
         >
           <option value="">PS B を選択</option>
-          {matrix.permissionSets.map((ps) => (
+          {allPermissionSets.filter((ps) => ps.id !== psAId).map((ps) => (
             <option key={ps.id} value={ps.id}>{ps.label}</option>
           ))}
         </select>
@@ -64,8 +56,15 @@ export const DiffView: FC<DiffViewProps> = ({ matrix }) => {
         )}
       </div>
 
-      {/* 差分テーブル */}
-      {psA && psB && psA.id !== psB.id ? (
+      {!matrix && (
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-sm text-zinc-500">
+            オブジェクトを選択すると差分比較ができます
+          </p>
+        </div>
+      )}
+
+      {matrix && psA && psB && psA.id !== psB.id ? (
         diffs.length > 0 ? (
           <div className="flex-1 overflow-auto">
             <table className="text-xs border-collapse w-full">
@@ -121,13 +120,13 @@ export const DiffView: FC<DiffViewProps> = ({ matrix }) => {
             </div>
           </div>
         )
-      ) : (
+      ) : matrix ? (
         <div className="flex-1 flex items-center justify-center">
           <p className="text-sm text-zinc-500">
             2つの異なる権限セットを選択してください
           </p>
         </div>
-      )}
+      ) : null}
     </div>
   );
 };
