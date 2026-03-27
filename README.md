@@ -1,139 +1,193 @@
 # SF Permission Manager
 
-Salesforce の権限セット定義・メンテナンスを効率化する Chrome 拡張機能。
+**Salesforce の権限セット定義・メンテナンスを効率化する Chrome 拡張機能**
 
-標準の設定画面では困難な **フィールド権限の一括表示・編集・漏れ検出・差分比較** を、マトリクスUIで直感的に操作できます。
+[![MV3](https://img.shields.io/badge/Chrome-Manifest_V3-4285F4?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/mv3/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React_18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## 機能
+> 標準の Salesforce 設定画面では困難な **フィールド権限の一括表示・編集・漏れ検出・差分比較** を、マトリクス UI で直感的に操作できます。
 
-### Phase 1（MVP）— 現在のスコープ
-- SF セッション自動取得（Salesforce Inspector Reloaded と同じ Cookie 再利用方式）
-- 権限セット一覧表示
-- 単一オブジェクトのフィールド権限マトリクス表示（行=フィールド、列=権限セット）
-- フィールド権限の個別・一括更新（Read / Edit トグル）
+---
 
-### Phase 2（予定）
-- 一括権限設定（全 Read ON、全 Read+Edit ON）
-- 漏れ検出（新規フィールドに対する未設定権限の自動検出）
-- 権限セット間の差分比較
-- オブジェクト権限（CRUD）の表示・編集
+## 何ができるか
 
-### Phase 3（予定）
-- プロファイルの FLS 表示（読み取り専用）
-- 権限セットグループ対応
-- 設定エクスポート（CSV / JSON）
+### 権限マトリクス
+
+```
+┌──────────────────────┬─────────┬─────────┬─────────┐
+│ フィールド            │ Admin   │ ReadOnly│ Editor  │
+│                      │ R  E    │ R  E    │ R  E    │
+├──────────────────────┼─────────┼─────────┼─────────┤
+│ Tax Amount  Currency │ ✓  ✓    │ ✓  –    │ ✓  ✓    │
+│ Unit Price  Currency │ ✓  –    │ ✓  –    │ ✓  ✓    │
+│ New Field●  Text     │ –  –    │ –  –    │ –  –    │ ← 漏れ検出
+├──────────────────────┴─────────┴─────────┴─────────┤
+│ CRUD: C✓ R✓ U✓ D– VA– MA–  │ C– R✓ U– D– VA– MA–│
+└────────────────────────────────────────────────────┘
+```
+
+### 主要機能
+
+| 機能 | 説明 |
+|------|------|
+| **権限セットグループ起点** | グループ選択 → 含まれる PS 表示 → 設定済みオブジェクト一覧 |
+| **FLS マトリクス** | フィールド × 権限セットの Read/Edit をトグル。型バッジ付き |
+| **オブジェクト権限 (CRUD)** | C/R/U/D/ViewAll/ModifyAll の表示・編集 |
+| **一括操作** | 全 Read ON / 全 Read+Edit ON ボタン |
+| **漏れ検出** | 権限未設定のカスタムフィールドを検出。フィールド作成日 vs PS 更新日の比較。一括 Read/Edit 付与 |
+| **差分比較** | 2 つの権限セット間の FLS 差分を並べて表示 |
+| **保存確認** | 変更一覧 + 対象環境名表示の確認ダイアログ。Ctrl+S ショートカット |
+| **Namespace フィルタ** | MANAERP / Custom / Standard をチェックボックスで絞り込み |
+| **ソート** | ラベル順 / API 名順 / フィールド数順 |
+
+---
+
+## アーキテクチャ
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Chrome Browser                                          │
+│                                                          │
+│  Content Script ──→ Service Worker ──→ Popup             │
+│  (SF画面検出)       (Cookie Broker)    (接続確認)         │
+│                         │                                │
+│                    sid cookie のみ                        │
+│                         ↓                                │
+│  Dashboard (別タブ) ─── 直接 fetch ─── SF REST API       │
+│  ┌─────────┬────────────────────┐      SF Tooling API    │
+│  │Sidebar  │ Matrix / Gaps / Diff│      describe API      │
+│  │グループ  │ タブ切り替え        │                        │
+│  │PS選択   │                    │                        │
+│  │オブジェクト│                    │                        │
+│  └─────────┴────────────────────┘                        │
+│                                                          │
+│  ※ SW は Cookie 取得のみ（30秒タイムアウト回避）            │
+│  ※ API 呼び出しは Dashboard から直接実行                    │
+└─────────────────────────────────────────────────────────┘
+```
+
+> **Cookie Broker パターン**: [Salesforce Inspector Reloaded](https://github.com/tprouvot/Salesforce-Inspector-reloaded) と同じ方式で `sid` Cookie を Bearer トークンとして利用。Connected App / OAuth 不要。
+
+---
+
+## セットアップ
+
+### 前提条件
+
+- Node.js 18+
+- npm
+
+### インストール & ビルド
+
+```bash
+git clone https://github.com/rossoandoy/sf-permission-manager.git
+cd sf-permission-manager
+npm install
+npm run build
+```
+
+### Chrome にロード
+
+1. `chrome://extensions` を開く
+2. 「デベロッパーモード」を ON
+3. 「パッケージ化されていない拡張機能を読み込む」→ `dist/` フォルダを選択
+
+### 開発
+
+```bash
+npm run dev       # Vite HMR
+npm test          # vitest watch
+npm run test:run  # テスト単発実行
+npm run type-check  # TypeScript 型チェック
+```
+
+---
+
+## 使い方
+
+### 基本フロー
+
+```
+1. SF にブラウザでログイン
+2. 拡張アイコンクリック → "Connected" 表示 → "Open Dashboard"
+3. 権限セットグループを選択
+4. 含まれる PS のチェックを確認
+5. オブジェクトを選択 → マトリクス表示
+6. R/E セルをクリックして権限をトグル
+7. Ctrl+S → 確認ダイアログ → 保存
+```
+
+### タブ
+
+| タブ | 用途 |
+|------|------|
+| **マトリクス** | FLS の Read/Edit トグル + CRUD 表示/編集 |
+| **漏れ検出** | 権限未設定フィールドの一覧 + 一括修正 |
+| **差分比較** | 2 PS 間の FLS 差分 |
+
+---
 
 ## 技術スタック
 
 | カテゴリ | 技術 |
 |---------|------|
 | Chrome Extension | Manifest V3 |
-| UI | React 18 + TypeScript + Tailwind CSS |
+| UI | React 18 + TypeScript strict + Tailwind CSS |
 | Build | Vite + CRXJS Vite Plugin |
-| SF API 通信 | REST API / Tooling API（セッション Cookie 再利用方式） |
-| テスト | Vitest + Testing Library |
+| SF API | REST API / Tooling API / describe API（Cookie 再利用方式） |
+| テスト | Vitest (31 tests) |
+| 状態管理 | useReducer + Context（外部ライブラリなし） |
 
-## セットアップ
-
-### 前提条件
-- Node.js 18+
-- npm
-
-### インストール
-
-```bash
-git clone https://github.com/rossoandoy/sf-permission-manager.git
-cd sf-permission-manager
-npm install
-```
-
-### 開発
-
-```bash
-npm run dev
-```
-
-HMR 対応の開発サーバーが起動します。
-
-### ビルド
-
-```bash
-npm run build
-```
-
-`dist/` ディレクトリに Chrome 拡張がビルドされます。
-
-### テスト
-
-```bash
-npm test          # watch モード
-npm run test:run  # 単発実行
-```
-
-### 型チェック
-
-```bash
-npm run type-check
-```
-
-## Chrome 拡張のインストール（開発版）
-
-1. `npm run build` でビルド
-2. Chrome で `chrome://extensions` を開く
-3. 「デベロッパーモード」を ON
-4. 「パッケージ化されていない拡張機能を読み込む」→ `dist/` フォルダを選択
-
-## 使い方
-
-1. Salesforce にブラウザでログイン
-2. 拡張アイコンをクリック → 自動的にセッションを取得
-3. オブジェクトを選択 → フィールド権限マトリクスが表示
-4. R（Read）/ E（Edit）ボタンをクリックして権限をトグル
-5. 「保存」ボタンで Salesforce に反映
-
-## アーキテクチャ
-
-```
-┌─ Background (Service Worker) ──────────────────────┐
-│  ・chrome.cookies で SF セッショントークン取得         │
-│  ・SF REST API / Tooling API 呼び出し                │
-│  ・データキャッシュ（chrome.storage.local）            │
-└──────────────────────┬────────────────────────────┘
-                       │ chrome.runtime.sendMessage
-┌─ Popup (React UI) ──┴────────────────────────────┐
-│  ・フィールド権限マトリクス表示                       │
-│  ・オブジェクト / 権限セット選択                      │
-│  ・一括変更操作 + 保存                               │
-└──────────────────────────────────────────────────┘
-┌─ Content Script ─────────────────────────────────┐
-│  ・SF 画面のホスト名検出 → Background に通知          │
-└──────────────────────────────────────────────────┘
-```
+---
 
 ## ディレクトリ構成
 
 ```
 src/
-├── background/          # Service Worker
-│   ├── index.ts         # メッセージルーター
-│   ├── sf-session.ts    # セッション管理
-│   ├── sf-api-client.ts # SF API クライアント
-│   └── cache.ts         # キャッシュ管理
-├── popup/               # メイン UI (React)
-│   ├── components/      # UI コンポーネント
-│   ├── hooks/           # カスタムフック
-│   ├── stores/          # 状態管理
-│   └── lib/             # ユーティリティ
-├── content/             # Content Script
-├── lib/                 # 共通ビジネスロジック
-│   ├── sf-queries.ts    # SOQL クエリ定義
-│   ├── permission-utils.ts
-│   └── gap-detector.ts
-└── types/               # TypeScript 型定義
+├── background/              # Service Worker（Cookie Broker のみ）
+│   ├── index.ts             # メッセージハンドラ（5メッセージタイプ）
+│   ├── sf-session.ts        # toApiHostname, getSessionCookie, checkStatus
+│   ├── sf-api-client.ts     # query, toolingQuery, describe, collection API
+│   └── cache.ts             # TTL 付き chrome.storage.local ラッパー
+├── popup/                   # Popup（接続確認 + Dashboard 起動）
+│   ├── App.tsx
+│   ├── index.html / index.tsx / index.css
+├── dashboard/               # Dashboard（メイン UI、別タブで起動）
+│   ├── App.tsx              # 3ペインレイアウト
+│   ├── components/
+│   │   ├── Header.tsx       # 接続状態 + API バッジ + 統計
+│   │   ├── ObjectSidebar.tsx # グループ→PS→オブジェクト選択
+│   │   ├── TabNav.tsx       # マトリクス / 漏れ検出 / 差分比較
+│   │   ├── MatrixView.tsx   # FLS マトリクス + CRUD + 保存
+│   │   ├── GapDetectionView.tsx  # 漏れ検出 + 一括修正
+│   │   ├── DiffView.tsx     # 差分比較
+│   │   ├── SaveConfirmDialog.tsx # 保存確認ダイアログ
+│   │   ├── FieldTypeBadge.tsx
+│   │   └── StatusBar.tsx
+│   ├── hooks/               # useSfSession, useFieldMetadata, usePermissions
+│   └── stores/              # useReducer ベース状態管理
+├── content/                 # Content Script（SF ページ検出）
+├── lib/                     # 共通ロジック
+│   ├── messaging.ts         # SW通信 + 直接API呼び出し
+│   ├── sf-queries.ts        # SOQL クエリ集約
+│   ├── permission-utils.ts  # データ変換・差分比較・一括変更構築
+│   └── gap-detector.ts      # 漏れ検出ロジック
+└── types/                   # TypeScript 型定義
+    ├── salesforce.ts        # SF API レスポンス型
+    └── permissions.ts       # 内部データモデル
 tests/
-├── lib/                 # ユニットテスト
-└── mocks/               # テスト用モック
+├── lib/                     # ユニットテスト（31 tests）
+└── mocks/                   # SF API レスポンスモック
 ```
+
+---
+
+## 参考
+
+- [Salesforce Inspector Reloaded](https://github.com/tprouvot/Salesforce-Inspector-reloaded) — Cookie 認証方式の着想元（MIT License）
+- [sf-chrome-extension](https://github.com/rossoandoy/sf-chrome-extension) — このプロジェクトの scaffold 生成スキル
 
 ## ライセンス
 
