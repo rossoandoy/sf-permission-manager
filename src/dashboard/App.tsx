@@ -59,6 +59,8 @@ const DashboardContent: FC = () => {
         status={status}
         sfHost={state.session?.sfHost ?? null}
         error={error}
+        objectCount={objects.length}
+        permissionSetCount={permissionSets.length}
         onReconnect={reconnect}
       />
 
@@ -128,6 +130,7 @@ const DashboardContent: FC = () => {
               {!loading && state.activeTab === "matrix" && matrix && (
                 <MatrixView
                   matrix={matrix}
+                  hostname={state.session?.sfHost ?? ""}
                   pendingChanges={pendingChanges}
                   pendingCount={pendingCount}
                   saving={saving}

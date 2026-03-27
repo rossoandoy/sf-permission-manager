@@ -9,9 +9,11 @@ import type {
   PermissionChangeResult,
 } from "../../types/permissions";
 import { FieldTypeBadge } from "./FieldTypeBadge";
+import { SaveConfirmDialog, type ChangeItem } from "./SaveConfirmDialog";
 
 interface MatrixViewProps {
   matrix: PermissionMatrix;
+  hostname: string;
   pendingChanges: Record<string, boolean>;
   pendingCount: number;
   saving: boolean;
@@ -27,6 +29,7 @@ interface MatrixViewProps {
 
 export const MatrixView: FC<MatrixViewProps> = ({
   matrix,
+  hostname,
   pendingChanges,
   pendingCount,
   saving,
@@ -37,6 +40,25 @@ export const MatrixView: FC<MatrixViewProps> = ({
 }) => {
   const [fieldFilter, setFieldFilter] = useState("");
   const [showGapsOnly, setShowGapsOnly] = useState(false);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+
+  // 確認ダイアログ用の変更アイテム一覧を構築
+  const changeItems: ChangeItem[] = useMemo(() => {
+    return Object.entries(pendingChanges).map(([key, newValue]) => {
+      const [fieldQualifiedName, permissionSetId, permission] = key.split(":");
+      const field = matrix.fields.find(f => f.qualifiedApiName === fieldQualifiedName);
+      const ps = matrix.permissionSets.find(p => p.id === permissionSetId);
+      const existing = matrix.fieldPermissions[fieldQualifiedName ?? ""]?.[permissionSetId ?? ""];
+      const currentValue = permission === "read" ? (existing?.read ?? false) : (existing?.edit ?? false);
+      return {
+        field: field?.label ?? fieldQualifiedName ?? "",
+        permissionSet: ps?.label ?? permissionSetId ?? "",
+        permission: permission ?? "",
+        from: currentValue,
+        to: newValue,
+      };
+    });
+  }, [pendingChanges, matrix]);
 
   const filteredFields = useMemo(() => {
     let fields = matrix.fields.filter((f) => f.isCustom);
@@ -168,7 +190,7 @@ export const MatrixView: FC<MatrixViewProps> = ({
               キャンセル
             </button>
             <button
-              onClick={onSave}
+              onClick={() => setShowSaveDialog(true)}
               disabled={saving}
               className="px-3 py-1 text-[11px] font-medium rounded bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50 transition-colors"
             >
@@ -303,6 +325,20 @@ export const MatrixView: FC<MatrixViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* 保存確認ダイアログ */}
+      {showSaveDialog && (
+        <SaveConfirmDialog
+          hostname={hostname}
+          changes={changeItems}
+          saving={saving}
+          onConfirm={() => {
+            onSave();
+            setShowSaveDialog(false);
+          }}
+          onCancel={() => setShowSaveDialog(false)}
+        />
+      )}
     </div>
   );
 };

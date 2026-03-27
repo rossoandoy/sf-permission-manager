@@ -32,9 +32,26 @@ export const ObjectSidebar: FC<ObjectSidebarProps> = ({
   const [objectFilter, setObjectFilter] = useState("");
   const [collapsed, setCollapsed] = useState(false);
   const [sortBy, setSortBy] = useState<"label" | "apiName" | "fieldCount">("label");
+  const [nsFilter, setNsFilter] = useState<Record<string, boolean>>({
+    MANAERP: true, Custom: true, Standard: true,
+  });
+
+  // namespace 別カウント
+  const nsCounts = useMemo(() => {
+    const counts: Record<string, number> = { MANAERP: 0, Custom: 0, Standard: 0 };
+    for (const obj of objects) {
+      const ns = obj.namespace;
+      if (ns in counts) counts[ns] = (counts[ns] ?? 0) + 1;
+    }
+    return counts;
+  }, [objects]);
 
   const filteredObjects = useMemo(() => {
     let result = objects;
+
+    // namespace フィルタ
+    result = result.filter((o) => nsFilter[o.namespace] !== false);
+
     if (objectFilter) {
       const lower = objectFilter.toLowerCase();
       result = result.filter(
@@ -137,6 +154,21 @@ export const ObjectSidebar: FC<ObjectSidebarProps> = ({
             >
               «
             </button>
+          </div>
+          {/* Namespace フィルタ */}
+          <div className="mt-1.5 flex items-center gap-2">
+            {(["MANAERP", "Custom", "Standard"] as const).map((ns) => (
+              <label key={ns} className="flex items-center gap-0.5 text-[10px] text-zinc-500 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={nsFilter[ns] !== false}
+                  onChange={(e) => setNsFilter({ ...nsFilter, [ns]: e.target.checked })}
+                  className="w-2.5 h-2.5 rounded accent-violet-500"
+                />
+                {ns === "MANAERP" ? "ERP" : ns === "Custom" ? "Custom" : "Std"}
+                <span className="text-zinc-600">({nsCounts[ns]})</span>
+              </label>
+            ))}
           </div>
           <div className="mt-1 flex items-center justify-between">
             <span className="text-[10px] text-zinc-500">
