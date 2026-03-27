@@ -2,7 +2,7 @@
  * グループ → PS → オブジェクト フロー管理
  */
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { usePermissionStore } from "../stores/permission-store";
 import {
   getPsGroups,
@@ -15,6 +15,8 @@ import {
 export function useFieldMetadata() {
   const { state, dispatch } = usePermissionStore();
   const hostname = state.session?.sfHost ?? null;
+  const objectsRef = useRef(state.objects);
+  objectsRef.current = state.objects;
 
   // 接続後にグループ一覧を取得
   useEffect(() => {
@@ -40,7 +42,7 @@ export function useFieldMetadata() {
     void load();
   }, [state.connectionStatus, hostname, dispatch]);
 
-  // グループ選択 → 含まれるPS取得
+  // グループ選択 → 含まれるPS取得 → オブジェクト取得
   const selectGroup = useCallback(
     async (groupId: string) => {
       if (!hostname) return;
@@ -51,7 +53,7 @@ export function useFieldMetadata() {
         const permissionSets = await getPermissionSetsByIds(hostname, permissionSetIds);
         dispatch({ type: "SET_PERMISSION_SETS", permissionSets });
 
-        // PS選択確定後、設定済みオブジェクトを取得
+        // 全PSのIDでオブジェクト取得（チェック状態に関係なく）
         if (permissionSetIds.length > 0) {
           dispatch({ type: "SET_LOADING", loading: true, message: "オブジェクト一覧を取得中..." });
           const objects = await getObjectsWithPermissions(hostname, permissionSetIds);
@@ -59,23 +61,6 @@ export function useFieldMetadata() {
         }
       } catch (err) {
         console.error("グループ詳細取得エラー:", err);
-      } finally {
-        dispatch({ type: "SET_LOADING", loading: false });
-      }
-    },
-    [hostname, dispatch],
-  );
-
-  // PS選択変更時にオブジェクト一覧を再取得
-  const refreshObjects = useCallback(
-    async (permissionSetIds: string[]) => {
-      if (!hostname || permissionSetIds.length === 0) return;
-      dispatch({ type: "SET_LOADING", loading: true, message: "オブジェクト一覧を取得中..." });
-      try {
-        const objects = await getObjectsWithPermissions(hostname, permissionSetIds);
-        dispatch({ type: "SET_OBJECTS", objects });
-      } catch (err) {
-        console.error("オブジェクト取得エラー:", err);
       } finally {
         dispatch({ type: "SET_LOADING", loading: false });
       }
@@ -92,8 +77,8 @@ export function useFieldMetadata() {
       try {
         const { fields, objectLabel, fieldCount } = await describeObjectFields(hostname, objectApiName);
         dispatch({ type: "SET_FIELDS", fields });
-        // オブジェクト一覧のラベルとフィールド数を更新
-        const updatedObjects = state.objects.map((o) =>
+        // objectsRef で最新のオブジェクト一覧を取得（stale closure回避）
+        const updatedObjects = objectsRef.current.map((o) =>
           o.apiName === objectApiName
             ? { ...o, label: objectLabel, fieldCount }
             : o,
@@ -118,7 +103,6 @@ export function useFieldMetadata() {
     loading: state.loading,
     loadingMessage: state.loadingMessage,
     selectGroup,
-    refreshObjects,
     loadFieldsForObject,
   };
 }

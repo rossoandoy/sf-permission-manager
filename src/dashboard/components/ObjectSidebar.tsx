@@ -113,12 +113,17 @@ export const ObjectSidebar: FC<ObjectSidebarProps> = ({
         </select>
       </div>
 
-      {/* 含まれるPS */}
+      {/* 含まれるPS — マトリクスに表示する列を選択 */}
       {permissionSets.length > 0 && (
         <div className="p-2 border-b border-zinc-700/50 max-h-40 overflow-y-auto">
-          <label className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1 block">
-            含まれるPS ({selectedPermissionSetIds.length}/{permissionSets.length})
-          </label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+              マトリクス表示PS ({selectedPermissionSetIds.length}/{permissionSets.length})
+            </label>
+            <span className="text-[9px] text-zinc-600" title="チェックしたPSの列がマトリクスに表示されます">
+              ?
+            </span>
+          </div>
           {permissionSets.map((ps) => (
             <label
               key={ps.id}
