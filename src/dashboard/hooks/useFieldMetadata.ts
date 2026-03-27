@@ -90,8 +90,15 @@ export function useFieldMetadata() {
       dispatch({ type: "SELECT_OBJECT", objectApiName });
       dispatch({ type: "SET_LOADING", loading: true, message: "フィールド情報を取得中..." });
       try {
-        const { fields } = await describeObjectFields(hostname, objectApiName);
+        const { fields, objectLabel, fieldCount } = await describeObjectFields(hostname, objectApiName);
         dispatch({ type: "SET_FIELDS", fields });
+        // オブジェクト一覧のラベルとフィールド数を更新
+        const updatedObjects = state.objects.map((o) =>
+          o.apiName === objectApiName
+            ? { ...o, label: objectLabel, fieldCount }
+            : o,
+        );
+        dispatch({ type: "SET_OBJECTS", objects: updatedObjects });
       } catch (err) {
         console.error("フィールド取得エラー:", err);
       } finally {

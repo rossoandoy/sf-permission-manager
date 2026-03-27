@@ -3,7 +3,7 @@
  * グループ → PS → オブジェクト フロー
  */
 
-import type { FC } from "react";
+import { useEffect, type FC } from "react";
 import { PermissionProvider, usePermissionStore } from "./stores/permission-store";
 import { useSfSession } from "./hooks/useSfSession";
 import { useFieldMetadata } from "./hooks/useFieldMetadata";
@@ -44,6 +44,25 @@ const DashboardContent: FC = () => {
   const selectedObject = selectedObjectApiName
     ? objects.find((o) => o.apiName === selectedObjectApiName) ?? null
     : null;
+
+  // キーボードショートカット
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Ctrl+S / Cmd+S: 保存（未保存変更がある場合）
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        if (pendingCount > 0 && !saving) {
+          saveChanges();
+        }
+      }
+      // Escape: 変更キャンセル
+      if (e.key === "Escape" && pendingCount > 0) {
+        cancelChanges();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [pendingCount, saving, saveChanges, cancelChanges]);
 
   const handleTogglePs = (id: string) => {
     const current = state.selectedPermissionSetIds;

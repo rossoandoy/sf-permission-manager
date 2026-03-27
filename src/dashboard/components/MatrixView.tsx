@@ -355,19 +355,19 @@ const PermCell: FC<PermCellProps> = ({ value, isPending, onClick }) => {
   return (
     <button
       onClick={onClick}
-      className={`w-5 h-5 rounded-[3px] flex items-center justify-center transition-all ${
+      className={`w-6 h-6 rounded flex items-center justify-center transition-all cursor-pointer ${
         value
           ? isPending
-            ? "bg-sky-500 ring-1 ring-amber-400"
-            : "bg-sky-600"
+            ? "bg-sky-500 ring-2 ring-amber-400 shadow-sm"
+            : "bg-sky-600 hover:bg-sky-500"
           : isPending
-            ? "bg-zinc-600 ring-1 ring-amber-400"
-            : "bg-zinc-700 hover:bg-zinc-600"
+            ? "bg-zinc-600 ring-2 ring-amber-400"
+            : "bg-zinc-700/80 hover:bg-zinc-500/80"
       }`}
     >
       {value && (
         <svg
-          className="w-3 h-3 text-white"
+          className="w-3.5 h-3.5 text-white"
           viewBox="0 0 12 12"
           fill="none"
           stroke="currentColor"
