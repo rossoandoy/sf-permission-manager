@@ -344,6 +344,79 @@ export async function updateFieldPermissions(
   };
 }
 
+/**
+ * オブジェクト権限(CRUD)の更新
+ */
+export async function updateObjectPermissions(
+  hostname: string,
+  _objectApiName: string,
+  pendingCrudChanges: Record<string, boolean>,
+  currentPermissions: Record<string, import("../types/permissions").ObjectPermissionEntry>,
+): Promise<PermissionChangeResult> {
+  const session = await requireSession(hostname);
+  const updates: { Id: string; [key: string]: unknown }[] = [];
+
+  // CRUD フィールド名のマッピング
+  const fieldMap: Record<string, string> = {
+    create: "PermissionsCreate",
+    read: "PermissionsRead",
+    edit: "PermissionsEdit",
+    delete: "PermissionsDelete",
+    viewAll: "PermissionsViewAllRecords",
+    modifyAll: "PermissionsModifyAllRecords",
+  };
+
+  // 変更をPSごとにグループ化
+  const byPs = new Map<string, Record<string, boolean>>();
+  for (const [key, value] of Object.entries(pendingCrudChanges)) {
+    const [psId, crudKey] = key.split(":");
+    if (!psId || !crudKey) continue;
+    if (!byPs.has(psId)) byPs.set(psId, {});
+    byPs.get(psId)![crudKey] = value;
+  }
+
+  for (const [psId, changes] of byPs) {
+    const existing = currentPermissions[psId];
+    if (!existing?.sfId) continue;
+    const rec: { Id: string; [key: string]: unknown } = { Id: existing.sfId };
+    for (const [crudKey, newValue] of Object.entries(changes)) {
+      const sfField = fieldMap[crudKey];
+      if (sfField) rec[sfField] = newValue;
+    }
+    updates.push(rec);
+  }
+
+  if (updates.length === 0) {
+    return { success: true, totalChanges: 0, successCount: 0, failureCount: 0, errors: [] };
+  }
+
+  const errors: PermissionChangeResult["errors"] = [];
+  let successCount = 0;
+
+  const results = await collectionUpdate(session, "ObjectPermissions", updates as { Id: string }[]);
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if (r?.success) successCount++;
+    else if (r) {
+      errors.push({
+        changeKey: updates[i]?.Id ?? `crud-${i}`,
+        errorCode: r.errors[0]?.statusCode ?? "UNKNOWN",
+        message: r.errors[0]?.message ?? "不明なエラー",
+      });
+    }
+  }
+
+  await cacheDeleteByPrefix(`sf:${hostname}:objPerms:`);
+
+  return {
+    success: errors.length === 0,
+    totalChanges: updates.length,
+    successCount,
+    failureCount: errors.length,
+    errors,
+  };
+}
+
 export async function clearCache(prefix?: string): Promise<{ cleared: boolean }> {
   await cacheDeleteByPrefix(prefix ?? "sf:");
   return { cleared: true };

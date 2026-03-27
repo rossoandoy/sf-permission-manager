@@ -37,8 +37,10 @@ const DashboardContent: FC = () => {
     saving,
     lastSaveResult,
     togglePermission,
+    toggleCrud,
     saveChanges,
     cancelChanges,
+    pendingCrudChanges,
   } = usePermissions();
 
   const selectedObject = selectedObjectApiName
@@ -151,17 +153,23 @@ const DashboardContent: FC = () => {
                   matrix={matrix}
                   hostname={state.session?.sfHost ?? ""}
                   pendingChanges={pendingChanges}
+                  pendingCrudChanges={pendingCrudChanges}
                   pendingCount={pendingCount}
                   saving={saving}
                   lastSaveResult={lastSaveResult}
                   onTogglePermission={togglePermission}
+                  onToggleCrud={toggleCrud}
                   onSave={saveChanges}
                   onCancel={cancelChanges}
                 />
               )}
 
               {!loading && state.activeTab === "gaps" && (
-                <GapDetectionView matrix={matrix} />
+                <GapDetectionView
+                  matrix={matrix}
+                  onTogglePermission={togglePermission}
+                  pendingCount={pendingCount}
+                />
               )}
 
               {!loading && state.activeTab === "diff" && (

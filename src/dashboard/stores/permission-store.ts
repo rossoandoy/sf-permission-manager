@@ -21,6 +21,16 @@ import type {
   PermissionChangeResult,
 } from "../../types/permissions";
 
+// --- 変更履歴 ---
+export interface ChangeHistoryEntry {
+  timestamp: number;
+  objectApiName: string;
+  type: "field" | "crud";
+  totalChanges: number;
+  successCount: number;
+  failureCount: number;
+}
+
 // --- State ---
 
 export interface PermissionState {
@@ -54,8 +64,12 @@ export interface PermissionState {
 
   // 変更追跡
   pendingChanges: Record<string, boolean>;
+  /** CRUD変更: "permissionSetId:create|read|edit|delete|viewAll|modifyAll" → newValue */
+  pendingCrudChanges: Record<string, boolean>;
   saving: boolean;
   lastSaveResult: PermissionChangeResult | null;
+  /** 変更履歴 */
+  changeHistory: ChangeHistoryEntry[];
 }
 
 export const initialPermissionState: PermissionState = {
@@ -76,8 +90,10 @@ export const initialPermissionState: PermissionState = {
   loading: false,
   loadingMessage: null,
   pendingChanges: {},
+  pendingCrudChanges: {},
   saving: false,
   lastSaveResult: null,
+  changeHistory: [],
 };
 
 // --- Actions ---
@@ -99,7 +115,9 @@ export type PermissionAction =
   | { type: "SET_ACTIVE_TAB"; tab: PermissionState["activeTab"] }
   | { type: "SET_LOADING"; loading: boolean; message?: string }
   | { type: "TOGGLE_PERMISSION"; changeKey: string; newValue: boolean }
+  | { type: "TOGGLE_CRUD"; changeKey: string; newValue: boolean }
   | { type: "CLEAR_PENDING" }
+  | { type: "ADD_HISTORY"; entry: ChangeHistoryEntry }
   | { type: "SET_SAVING"; saving: boolean }
   | { type: "SET_SAVE_RESULT"; result: PermissionChangeResult }
   | { type: "RESET" };
@@ -207,8 +225,18 @@ export function permissionReducer(
         lastSaveResult: null,
       };
 
+    case "TOGGLE_CRUD":
+      return {
+        ...state,
+        pendingCrudChanges: { ...state.pendingCrudChanges, [action.changeKey]: action.newValue },
+        lastSaveResult: null,
+      };
+
     case "CLEAR_PENDING":
-      return { ...state, pendingChanges: {}, lastSaveResult: null };
+      return { ...state, pendingChanges: {}, pendingCrudChanges: {}, lastSaveResult: null };
+
+    case "ADD_HISTORY":
+      return { ...state, changeHistory: [action.entry, ...state.changeHistory].slice(0, 50) };
 
     case "SET_SAVING":
       return { ...state, saving: action.saving };
@@ -219,6 +247,7 @@ export function permissionReducer(
         saving: false,
         lastSaveResult: action.result,
         pendingChanges: action.result.success ? {} : state.pendingChanges,
+        pendingCrudChanges: action.result.success ? {} : state.pendingCrudChanges,
       };
 
     case "RESET":

@@ -15,6 +15,7 @@ interface MatrixViewProps {
   matrix: PermissionMatrix;
   hostname: string;
   pendingChanges: Record<string, boolean>;
+  pendingCrudChanges: Record<string, boolean>;
   pendingCount: number;
   saving: boolean;
   lastSaveResult: PermissionChangeResult | null;
@@ -23,6 +24,7 @@ interface MatrixViewProps {
     permissionSetId: string,
     permission: "read" | "edit",
   ) => void;
+  onToggleCrud: (permissionSetId: string, crudKey: string) => void;
   onSave: () => void;
   onCancel: () => void;
 }
@@ -31,10 +33,12 @@ export const MatrixView: FC<MatrixViewProps> = ({
   matrix,
   hostname,
   pendingChanges,
+  pendingCrudChanges,
   pendingCount,
   saving,
   lastSaveResult,
   onTogglePermission,
+  onToggleCrud,
   onSave,
   onCancel,
 }) => {
@@ -248,6 +252,8 @@ export const MatrixView: FC<MatrixViewProps> = ({
             <ObjectPermissionRows
               permissionSets={matrix.permissionSets}
               objectPermissions={matrix.objectPermissions}
+              pendingCrudChanges={pendingCrudChanges}
+              onToggleCrud={onToggleCrud}
             />
 
             {filteredFields.map((field) => (
@@ -402,11 +408,15 @@ const CRUD_LABELS = [
 interface ObjectPermissionRowsProps {
   permissionSets: { id: string }[];
   objectPermissions: Record<string, import("../../types/permissions").ObjectPermissionEntry>;
+  pendingCrudChanges: Record<string, boolean>;
+  onToggleCrud: (permissionSetId: string, crudKey: string) => void;
 }
 
 const ObjectPermissionRows: FC<ObjectPermissionRowsProps> = ({
   permissionSets,
   objectPermissions,
+  pendingCrudChanges,
+  onToggleCrud,
 }) => {
   return (
     <>
@@ -433,22 +443,31 @@ const ObjectPermissionRows: FC<ObjectPermissionRowsProps> = ({
           </td>
           {permissionSets.map((ps) => {
             const perm = objectPermissions[ps.id];
-            const value = perm ? perm[crud.key] : false;
+            const pendingKey = `${ps.id}:${crud.key}`;
+            const pendingValue = pendingCrudChanges[pendingKey];
+            const currentValue = perm ? perm[crud.key] : false;
+            const displayValue = pendingValue !== undefined ? pendingValue : currentValue;
+            const isPending = pendingValue !== undefined;
             return (
               <td
                 key={ps.id}
                 className="px-1 py-1 border-b border-zinc-800/30 text-center"
               >
-                <span
-                  className={`inline-block w-6 h-5 rounded text-center leading-5 text-[10px] font-bold ${
-                    value
-                      ? "bg-emerald-700/60 text-emerald-200"
-                      : "bg-zinc-700/40 text-zinc-600"
+                <button
+                  onClick={() => onToggleCrud(ps.id, crud.key)}
+                  className={`inline-block w-6 h-5 rounded text-center leading-5 text-[10px] font-bold cursor-pointer transition-all ${
+                    displayValue
+                      ? isPending
+                        ? "bg-emerald-600 text-white ring-2 ring-amber-400"
+                        : "bg-emerald-700/60 text-emerald-200 hover:bg-emerald-600/80"
+                      : isPending
+                        ? "bg-zinc-600 ring-2 ring-amber-400 text-zinc-300"
+                        : "bg-zinc-700/40 text-zinc-600 hover:bg-zinc-600/60"
                   }`}
-                  title={`${crud.label}: ${value ? "ON" : "OFF"}`}
+                  title={`${crud.label}: ${displayValue ? "ON" : "OFF"}${isPending ? " (変更あり)" : ""}`}
                 >
-                  {value ? "✓" : "–"}
-                </span>
+                  {displayValue ? "✓" : "–"}
+                </button>
               </td>
             );
           })}
