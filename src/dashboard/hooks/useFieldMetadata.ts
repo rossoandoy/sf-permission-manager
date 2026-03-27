@@ -2,7 +2,7 @@
  * グループ → PS → オブジェクト フロー管理
  */
 
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback } from "react";
 import { usePermissionStore } from "../stores/permission-store";
 import {
   getPsGroups,
@@ -15,8 +15,6 @@ import {
 export function useFieldMetadata() {
   const { state, dispatch } = usePermissionStore();
   const hostname = state.session?.sfHost ?? null;
-  const objectsRef = useRef(state.objects);
-  objectsRef.current = state.objects;
 
   // 接続後にグループ一覧を取得
   useEffect(() => {
@@ -77,13 +75,8 @@ export function useFieldMetadata() {
       try {
         const { fields, objectLabel, fieldCount } = await describeObjectFields(hostname, objectApiName);
         dispatch({ type: "SET_FIELDS", fields });
-        // objectsRef で最新のオブジェクト一覧を取得（stale closure回避）
-        const updatedObjects = objectsRef.current.map((o) =>
-          o.apiName === objectApiName
-            ? { ...o, label: objectLabel, fieldCount }
-            : o,
-        );
-        dispatch({ type: "SET_OBJECTS", objects: updatedObjects });
+        // ラベルとフィールド数のみ更新（並び順に影響しない）
+        dispatch({ type: "UPDATE_OBJECT_META", apiName: objectApiName, label: objectLabel, fieldCount });
       } catch (err) {
         console.error("フィールド取得エラー:", err);
       } finally {

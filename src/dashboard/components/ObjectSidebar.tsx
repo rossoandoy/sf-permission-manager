@@ -60,13 +60,18 @@ export const ObjectSidebar: FC<ObjectSidebarProps> = ({
           o.label.toLowerCase().includes(lower),
       );
     }
-    // ソート
+    // ソート（API名は不変なのでラベル順でもAPI名をセカンダリキーに使い安定化）
     return [...result].sort((a, b) => {
-      if (sortBy === "label") return a.label.localeCompare(b.label);
+      if (sortBy === "label") {
+        const cmp = a.label.localeCompare(b.label);
+        return cmp !== 0 ? cmp : a.apiName.localeCompare(b.apiName);
+      }
       if (sortBy === "apiName") return a.apiName.localeCompare(b.apiName);
-      return b.fieldCount - a.fieldCount; // フィールド数は降順
+      // フィールド数降順、同数ならAPI名順で安定化
+      const diff = b.fieldCount - a.fieldCount;
+      return diff !== 0 ? diff : a.apiName.localeCompare(b.apiName);
     });
-  }, [objects, objectFilter, sortBy]);
+  }, [objects, objectFilter, sortBy, nsFilter]);
 
   // namespace グループ化
   const groupedObjects = useMemo(() => {
