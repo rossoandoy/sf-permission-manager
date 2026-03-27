@@ -19,6 +19,7 @@ export interface FieldInfo {
   label: string;
   dataType: string;
   lastModified: string;
+  createdDate: string;
   isCustom: boolean;
   namespace: string | null;
 }

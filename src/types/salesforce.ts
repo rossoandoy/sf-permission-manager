@@ -131,6 +131,14 @@ export type SfCollectionResponse = {
   errors: { statusCode: string; message: string; fields: string[] }[];
 }[]
 
+// --- CustomField (Tooling API) ---
+export interface SfCustomField {
+  DeveloperName: string;
+  TableEnumOrId: string;
+  CreatedDate: string;
+  LastModifiedDate: string;
+}
+
 // --- Describe API ---
 export interface SfDescribeField {
   name: string;

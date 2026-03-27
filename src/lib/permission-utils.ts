@@ -65,6 +65,7 @@ export function toFieldInfo(sf: SfFieldDefinition): FieldInfo {
     label: sf.Label,
     dataType: sf.DataType,
     lastModified: sf.LastModifiedDate,
+    createdDate: "",
     isCustom: sf.IsCustom,
     namespace: sf.NamespacePrefix,
   };

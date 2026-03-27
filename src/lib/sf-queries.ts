@@ -108,6 +108,15 @@ export function queryPermissionSetsByIds(ids: string[]): string {
   `;
 }
 
+/** カスタムフィールドの作成日・更新日を取得（Tooling API） */
+export function queryCustomFieldDates(objectApiName: string): string {
+  return `
+    SELECT DeveloperName, TableEnumOrId, CreatedDate, LastModifiedDate
+    FROM CustomField
+    WHERE TableEnumOrId = '${escapeSoql(objectApiName)}'
+  `;
+}
+
 // --- ユーティリティ ---
 
 /** SOQLインジェクション防止のためのエスケープ */

@@ -19,6 +19,7 @@ import type {
 } from "../types/permissions";
 import {
   query,
+  toolingQuery,
   describeObject,
   collectionUpdate,
   collectionCreate,
@@ -32,6 +33,7 @@ import {
   queryDistinctObjectTypes,
   queryFieldPermissionsByObject,
   queryObjectPermissionsByObject,
+  queryCustomFieldDates,
 } from "./sf-queries";
 import {
   toPermissionSetInfo,
@@ -47,7 +49,7 @@ import {
   CACHE_TTL_METADATA,
   cacheDeleteByPrefix,
 } from "../background/cache";
-import type { SfSession, SfPermissionSet, SfPermissionSetGroupComponent, SfFieldPermission, SfObjectPermission } from "../types/salesforce";
+import type { SfSession, SfPermissionSet, SfPermissionSetGroupComponent, SfFieldPermission, SfObjectPermission, SfCustomField } from "../types/salesforce";
 
 // --- SW経由メッセージング (セッション/ホスト解決のみ) ---
 
@@ -215,15 +217,38 @@ export async function describeObjectFields(
   if (cached) return cached;
 
   const desc = await describeObject(session, objectApiName);
-  const fields: FieldInfo[] = desc.fields.map((f) => ({
-    qualifiedApiName: `${objectApiName}.${f.name}`,
-    fieldApiName: f.name,
-    label: f.label,
-    dataType: f.type,
-    lastModified: "",
-    isCustom: f.custom,
-    namespace: f.name.includes("__") ? (f.name.split("__")[0] ?? null) : null,
-  }));
+
+  // CustomField から日付情報を取得（エラー時はスキップ）
+  let dateMap = new Map<string, { createdDate: string; lastModified: string }>();
+  try {
+    const cfSoql = queryCustomFieldDates(objectApiName);
+    const cfResult = await toolingQuery<SfCustomField>(session, cfSoql);
+    for (const cf of cfResult.records) {
+      // DeveloperName は __c なしのAPI名
+      dateMap.set(cf.DeveloperName, {
+        createdDate: cf.CreatedDate,
+        lastModified: cf.LastModifiedDate,
+      });
+    }
+  } catch {
+    // Tooling API エラーは無視（日付情報なしで続行）
+  }
+
+  const fields: FieldInfo[] = desc.fields.map((f) => {
+    // CustomField の DeveloperName と照合（__c を除去）
+    const devName = f.name.replace(/__c$/, "").replace(/^[A-Za-z0-9]+__/, "");
+    const dates = dateMap.get(devName);
+    return {
+      qualifiedApiName: `${objectApiName}.${f.name}`,
+      fieldApiName: f.name,
+      label: f.label,
+      dataType: f.type,
+      lastModified: dates?.lastModified ?? "",
+      createdDate: dates?.createdDate ?? "",
+      isCustom: f.custom,
+      namespace: f.name.includes("__") ? (f.name.split("__")[0] ?? null) : null,
+    };
+  });
 
   const data = { fields, objectLabel: desc.label, fieldCount: desc.fields.length };
   await cacheSet(cacheKey, data, CACHE_TTL_METADATA);
