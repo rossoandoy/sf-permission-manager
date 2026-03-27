@@ -73,10 +73,10 @@ export function useFieldMetadata() {
       dispatch({ type: "SELECT_OBJECT", objectApiName });
       dispatch({ type: "SET_LOADING", loading: true, message: "フィールド情報を取得中..." });
       try {
-        const { fields, objectLabel, fieldCount } = await describeObjectFields(hostname, objectApiName);
+        const { fields, fieldCount } = await describeObjectFields(hostname, objectApiName);
         dispatch({ type: "SET_FIELDS", fields });
-        // ラベルとフィールド数のみ更新（並び順に影響しない）
-        dispatch({ type: "UPDATE_OBJECT_META", apiName: objectApiName, label: objectLabel, fieldCount });
+        // フィールド数のみ更新（ラベルは変えない → ソート順が安定）
+        dispatch({ type: "UPDATE_OBJECT_META", apiName: objectApiName, fieldCount });
       } catch (err) {
         console.error("フィールド取得エラー:", err);
       } finally {

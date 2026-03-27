@@ -106,7 +106,7 @@ export type PermissionAction =
   | { type: "SET_PERMISSION_SETS"; permissionSets: PermissionSetInfo[] }
   | { type: "SELECT_PERMISSION_SETS"; ids: string[] }
   | { type: "SET_OBJECTS"; objects: ObjectInfo[] }
-  | { type: "UPDATE_OBJECT_META"; apiName: string; label: string; fieldCount: number }
+  | { type: "UPDATE_OBJECT_META"; apiName: string; fieldCount: number }
   | { type: "SELECT_OBJECT"; objectApiName: string | null }
   | { type: "SET_DETECTED_OBJECT"; objectApiName: string | null }
   | { type: "SET_FIELDS"; fields: FieldInfo[] }
@@ -184,7 +184,7 @@ export function permissionReducer(
         ...state,
         objects: state.objects.map((o) =>
           o.apiName === action.apiName
-            ? { ...o, label: action.label, fieldCount: action.fieldCount }
+            ? { ...o, fieldCount: action.fieldCount }
             : o,
         ),
       };
