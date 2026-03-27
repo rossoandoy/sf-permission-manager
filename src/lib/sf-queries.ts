@@ -85,6 +85,7 @@ export const QUERY_ENTITY_DEFINITIONS = `
   FROM EntityDefinition
   WHERE IsQueryable = true
   ORDER BY Label ASC
+  LIMIT 2000
 `;
 
 /** 権限セットグループ一覧 */
