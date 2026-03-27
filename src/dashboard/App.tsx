@@ -1,5 +1,6 @@
 /**
- * Dashboard ルートコンポーネント — フルページ3ペインレイアウト
+ * Dashboard ルートコンポーネント
+ * グループ → PS → オブジェクト フロー
  */
 
 import type { FC } from "react";
@@ -11,18 +12,22 @@ import { Header } from "./components/Header";
 import { TabNav } from "./components/TabNav";
 import { ObjectSidebar } from "./components/ObjectSidebar";
 import { MatrixView } from "./components/MatrixView";
+import { GapDetectionView } from "./components/GapDetectionView";
+import { DiffView } from "./components/DiffView";
 import { StatusBar } from "./components/StatusBar";
 
 const DashboardContent: FC = () => {
   const { state, dispatch } = usePermissionStore();
   const { status, error, reconnect } = useSfSession();
   const {
+    psGroups,
+    selectedGroupId,
     objects,
     permissionSets,
     selectedObjectApiName,
-    detectedObjectApiName,
     loading,
     loadingMessage,
+    selectGroup,
     loadFieldsForObject,
   } = useFieldMetadata();
   const {
@@ -39,6 +44,14 @@ const DashboardContent: FC = () => {
   const selectedObject = selectedObjectApiName
     ? objects.find((o) => o.apiName === selectedObjectApiName) ?? null
     : null;
+
+  const handleTogglePs = (id: string) => {
+    const current = state.selectedPermissionSetIds;
+    const next = current.includes(id)
+      ? current.filter((x) => x !== id)
+      : [...current, id];
+    dispatch({ type: "SELECT_PERMISSION_SETS", ids: next });
+  };
 
   return (
     <div className="h-screen flex flex-col bg-zinc-900 text-zinc-100 overflow-hidden">
@@ -84,18 +97,21 @@ const DashboardContent: FC = () => {
         <>
           <div className="flex flex-1 min-h-0">
             <ObjectSidebar
+              psGroups={psGroups}
+              selectedGroupId={selectedGroupId}
+              permissionSets={permissionSets}
+              selectedPermissionSetIds={state.selectedPermissionSetIds}
               objects={objects}
               selectedObjectApiName={selectedObjectApiName}
-              detectedObjectApiName={detectedObjectApiName}
+              onSelectGroup={selectGroup}
+              onTogglePermissionSet={handleTogglePs}
               onSelectObject={loadFieldsForObject}
             />
 
             <div className="flex-1 flex flex-col min-w-0">
               <TabNav
                 activeTab={state.activeTab}
-                onTabChange={(tab) =>
-                  dispatch({ type: "SET_ACTIVE_TAB", tab })
-                }
+                onTabChange={(tab) => dispatch({ type: "SET_ACTIVE_TAB", tab })}
               />
 
               {loading && (
@@ -109,7 +125,7 @@ const DashboardContent: FC = () => {
                 </div>
               )}
 
-              {!loading && matrix && state.activeTab === "matrix" && (
+              {!loading && state.activeTab === "matrix" && matrix && (
                 <MatrixView
                   matrix={matrix}
                   pendingChanges={pendingChanges}
@@ -122,20 +138,24 @@ const DashboardContent: FC = () => {
                 />
               )}
 
-              {!loading && !matrix && selectedObjectApiName === null && (
+              {!loading && state.activeTab === "gaps" && (
+                <GapDetectionView matrix={matrix} />
+              )}
+
+              {!loading && state.activeTab === "diff" && (
+                <DiffView matrix={matrix} />
+              )}
+
+              {!loading && !matrix && state.activeTab === "matrix" && (
                 <div className="flex-1 flex items-center justify-center">
                   <div className="text-center">
                     <div className="text-4xl mb-3 opacity-20">◧</div>
                     <p className="text-sm text-zinc-500">
-                      左のリストからオブジェクトを選択してください
+                      {!selectedGroupId
+                        ? "権限セットグループを選択してください"
+                        : "オブジェクトを選択してください"}
                     </p>
                   </div>
-                </div>
-              )}
-
-              {!loading && (state.activeTab === "gaps" || state.activeTab === "diff") && (
-                <div className="flex-1 flex items-center justify-center">
-                  <p className="text-sm text-zinc-500">Coming soon</p>
                 </div>
               )}
             </div>
@@ -153,12 +173,10 @@ const DashboardContent: FC = () => {
   );
 };
 
-const App: FC = () => {
-  return (
-    <PermissionProvider>
-      <DashboardContent />
-    </PermissionProvider>
-  );
-};
+const App: FC = () => (
+  <PermissionProvider>
+    <DashboardContent />
+  </PermissionProvider>
+);
 
 export default App;

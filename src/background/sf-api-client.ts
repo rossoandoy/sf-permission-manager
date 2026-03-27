@@ -11,6 +11,7 @@ import type {
   SfCompositeResponse,
   SfCollectionResponse,
   SfApiErrorResponse,
+  SfDescribeResult,
 } from "../types/salesforce";
 
 // --- 定数 ---
@@ -272,6 +273,21 @@ export async function collectionCreate(
   }
 
   return results;
+}
+
+// --- Describe API ---
+
+/**
+ * オブジェクトの describe（フィールド一覧含む）を取得
+ */
+export async function describeObject(
+  session: SfSession,
+  sobjectType: string,
+): Promise<SfDescribeResult> {
+  return sfFetch<SfDescribeResult>(
+    session,
+    `${apiBase(session)}/sobjects/${sobjectType}/describe`,
+  );
 }
 
 // --- Composite API ---

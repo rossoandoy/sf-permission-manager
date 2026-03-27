@@ -131,6 +131,25 @@ export type SfCollectionResponse = {
   errors: { statusCode: string; message: string; fields: string[] }[];
 }[]
 
+// --- Describe API ---
+export interface SfDescribeField {
+  name: string;
+  label: string;
+  type: string;
+  custom: boolean;
+  updateable: boolean;
+  nillable: boolean;
+  compoundFieldName: string | null;
+}
+
+export interface SfDescribeResult {
+  name: string;
+  label: string;
+  custom: boolean;
+  keyPrefix: string | null;
+  fields: SfDescribeField[];
+}
+
 // --- エラー ---
 export interface SfApiErrorResponse {
   message: string;

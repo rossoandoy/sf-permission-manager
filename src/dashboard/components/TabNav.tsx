@@ -13,8 +13,8 @@ interface TabNavProps {
 
 const TABS: { id: TabId; icon: string; label: string; enabled: boolean }[] = [
   { id: "matrix", icon: "▦", label: "マトリクス", enabled: true },
-  { id: "gaps", icon: "⚡", label: "漏れ検出", enabled: false },
-  { id: "diff", icon: "≡", label: "差分比較", enabled: false },
+  { id: "gaps", icon: "⚡", label: "漏れ検出", enabled: true },
+  { id: "diff", icon: "≡", label: "差分比較", enabled: true },
 ];
 
 export const TabNav: FC<TabNavProps> = ({ activeTab, onTabChange }) => {

@@ -1,8 +1,6 @@
 /**
  * Service Worker エントリポイント
- * sf-custom-config-tool と同じ認証パターン:
- * - Background はCookie取得のみ（API呼び出しなし）
- * - Popup側がホスト名を渡してセッションを取得
+ * グループ → PS → オブジェクト フロー対応
  */
 
 import {
@@ -14,7 +12,7 @@ import {
 } from "./sf-session";
 import {
   query,
-  toolingQuery,
+  describeObject,
   collectionUpdate,
   collectionCreate,
   SfSessionExpiredError,
@@ -31,26 +29,26 @@ import {
 } from "./cache";
 import {
   QUERY_PERMISSION_SETS,
+  QUERY_PERMISSION_SET_GROUPS,
+  queryPermissionSetGroupComponents,
+  queryPermissionSetsByIds,
+  queryDistinctObjectTypes,
   queryFieldPermissionsByObject,
   queryObjectPermissionsByObject,
-  queryFieldDefinitions,
-  QUERY_ENTITY_DEFINITIONS,
 } from "../lib/sf-queries";
 import {
   toPermissionSetInfo,
   toFieldPermissionEntry,
   toObjectPermissionEntry,
-  toFieldInfo,
-  toObjectInfo,
   groupChangesForApi,
 } from "../lib/permission-utils";
 import type {
   SfSession,
   SfPermissionSet,
+  SfPermissionSetGroup,
+  SfPermissionSetGroupComponent,
   SfFieldPermission,
   SfObjectPermission,
-  SfFieldDefinition,
-  SfEntityDefinition,
 } from "../types/salesforce";
 import type {
   PermissionSetInfo,
@@ -68,7 +66,12 @@ type BackgroundMessage =
   | { type: "GET_SF_HOST"; url: string }
   | { type: "GET_SESSION"; hostname: string }
   | { type: "GET_STATUS" }
+  | { type: "GET_PS_GROUPS"; hostname: string }
+  | { type: "GET_PS_GROUP_COMPONENTS"; hostname: string; groupId: string }
   | { type: "GET_PERMISSION_SETS"; hostname: string }
+  | { type: "GET_PERMISSION_SETS_BY_IDS"; hostname: string; ids: string[] }
+  | { type: "GET_OBJECTS_WITH_PERMISSIONS"; hostname: string; permissionSetIds: string[] }
+  | { type: "DESCRIBE_OBJECT"; hostname: string; objectApiName: string }
   | {
       type: "GET_FIELD_PERMISSIONS";
       hostname: string;
@@ -81,8 +84,6 @@ type BackgroundMessage =
       objectApiName: string;
       permissionSetIds: string[];
     }
-  | { type: "GET_FIELD_DEFINITIONS"; hostname: string; objectApiName: string }
-  | { type: "GET_ENTITY_DEFINITIONS"; hostname: string }
   | { type: "UPDATE_FIELD_PERMISSIONS"; hostname: string; changes: BulkPermissionChange[] }
   | { type: "CLEAR_CACHE"; prefix?: string }
   | { type: "SF_HOST_DETECTED"; sfHost: string; currentObjectApiName?: string }
@@ -130,24 +131,22 @@ async function handleMessage(message: BackgroundMessage): Promise<unknown> {
       return handleGetSession(message.hostname);
     case "GET_STATUS":
       return checkConnectionStatus();
+    case "GET_PS_GROUPS":
+      return handleGetPsGroups(message.hostname);
+    case "GET_PS_GROUP_COMPONENTS":
+      return handleGetPsGroupComponents(message.hostname, message.groupId);
     case "GET_PERMISSION_SETS":
       return handleGetPermissionSets(message.hostname);
+    case "GET_PERMISSION_SETS_BY_IDS":
+      return handleGetPermissionSetsByIds(message.hostname, message.ids);
+    case "GET_OBJECTS_WITH_PERMISSIONS":
+      return handleGetObjectsWithPermissions(message.hostname, message.permissionSetIds);
+    case "DESCRIBE_OBJECT":
+      return handleDescribeObject(message.hostname, message.objectApiName);
     case "GET_FIELD_PERMISSIONS":
-      return handleGetFieldPermissions(
-        message.hostname,
-        message.objectApiName,
-        message.permissionSetIds,
-      );
+      return handleGetFieldPermissions(message.hostname, message.objectApiName, message.permissionSetIds);
     case "GET_OBJECT_PERMISSIONS":
-      return handleGetObjectPermissions(
-        message.hostname,
-        message.objectApiName,
-        message.permissionSetIds,
-      );
-    case "GET_FIELD_DEFINITIONS":
-      return handleGetFieldDefinitions(message.hostname, message.objectApiName);
-    case "GET_ENTITY_DEFINITIONS":
-      return handleGetEntityDefinitions(message.hostname);
+      return handleGetObjectPermissions(message.hostname, message.objectApiName, message.permissionSetIds);
     case "UPDATE_FIELD_PERMISSIONS":
       return handleUpdateFieldPermissions(message.hostname, message.changes);
     case "CLEAR_CACHE":
@@ -157,13 +156,11 @@ async function handleMessage(message: BackgroundMessage): Promise<unknown> {
     case "GET_DETECTED_OBJECT":
       return handleGetDetectedObject();
     default:
-      throw new Error(
-        `不明なメッセージタイプ: ${(message as { type: string }).type}`,
-      );
+      throw new Error(`不明なメッセージタイプ: ${(message as { type: string }).type}`);
   }
 }
 
-// --- セッション関連（シンプル: Cookie取得のみ） ---
+// --- セッション ---
 
 async function handleGetSession(
   hostname: string,
@@ -175,32 +172,145 @@ async function handleGetSession(
   return result;
 }
 
-/** ホスト名からSfSessionを構築してAPI呼び出しに使用 */
 async function requireSession(hostname: string): Promise<SfSession> {
   const cookieResult = await getSessionCookie(hostname);
   if (!cookieResult) {
     throw new SfSessionExpiredError();
   }
-  // enrichSession は呼ばない — orgId/userInfo 取得が遅い/失敗するとデータ取得全体がブロックされる
-  // キャッシュキーには hostname をフォールバックとして使用
   return buildSessionFromCookie(cookieResult.hostname, cookieResult.sessionId);
 }
 
-// --- データ取得ハンドラ ---
+// --- 権限セットグループ ---
+
+async function handleGetPsGroups(hostname: string): Promise<SfPermissionSetGroup[]> {
+  const session = await requireSession(hostname);
+  const cacheKey = buildCacheKey(hostname, "psGroups", "all");
+  const cached = await cacheGet<SfPermissionSetGroup[]>(cacheKey);
+  if (cached) return cached;
+
+  const result = await query<SfPermissionSetGroup>(session, QUERY_PERMISSION_SET_GROUPS);
+  await cacheSet(cacheKey, result.records, CACHE_TTL_METADATA);
+  return result.records;
+}
+
+async function handleGetPsGroupComponents(
+  hostname: string,
+  groupId: string,
+): Promise<{ permissionSetIds: string[] }> {
+  const session = await requireSession(hostname);
+  const cacheKey = buildCacheKey(hostname, "psGroupComp", groupId);
+  const cached = await cacheGet<{ permissionSetIds: string[] }>(cacheKey);
+  if (cached) return cached;
+
+  const soql = queryPermissionSetGroupComponents([groupId]);
+  const result = await query<SfPermissionSetGroupComponent>(session, soql);
+  const ids = result.records.map((r) => r.PermissionSetId);
+  const data = { permissionSetIds: ids };
+  await cacheSet(cacheKey, data, CACHE_TTL_METADATA);
+  return data;
+}
+
+// --- 権限セット ---
 
 async function handleGetPermissionSets(hostname: string): Promise<PermissionSetInfo[]> {
   const session = await requireSession(hostname);
-  const cacheKey = buildCacheKey(session.orgId || hostname, "permissionSets", "all");
-
+  const cacheKey = buildCacheKey(hostname, "permissionSets", "all");
   const cached = await cacheGet<PermissionSetInfo[]>(cacheKey);
   if (cached) return cached;
 
   const result = await query<SfPermissionSet>(session, QUERY_PERMISSION_SETS);
   const mapped = result.records.map(toPermissionSetInfo);
-
   await cacheSet(cacheKey, mapped, CACHE_TTL_METADATA);
   return mapped;
 }
+
+async function handleGetPermissionSetsByIds(
+  hostname: string,
+  ids: string[],
+): Promise<PermissionSetInfo[]> {
+  if (ids.length === 0) return [];
+  const session = await requireSession(hostname);
+  const soql = queryPermissionSetsByIds(ids);
+  const result = await query<SfPermissionSet>(session, soql);
+  return result.records.map(toPermissionSetInfo);
+}
+
+// --- オブジェクト ---
+
+async function handleGetObjectsWithPermissions(
+  hostname: string,
+  permissionSetIds: string[],
+): Promise<ObjectInfo[]> {
+  if (permissionSetIds.length === 0) return [];
+  const session = await requireSession(hostname);
+  const cacheKey = buildCacheKey(hostname, "objTypes", permissionSetIds.sort().join(","));
+  const cached = await cacheGet<ObjectInfo[]>(cacheKey);
+  if (cached) return cached;
+
+  const soql = queryDistinctObjectTypes(permissionSetIds);
+  const result = await query<{ SobjectType: string }>(session, soql);
+  const objectApiNames = result.records.map((r) => r.SobjectType);
+
+  // describe で各オブジェクトのラベル・フィールド数を取得（並列）
+  const objects: ObjectInfo[] = [];
+  for (const apiName of objectApiNames) {
+    try {
+      const desc = await describeObject(session, apiName);
+      const isCustom = apiName.endsWith("__c") || apiName.endsWith("__mdt") || apiName.endsWith("__e");
+      const ns = apiName.includes("__") ? apiName.split("__")[0] ?? null : null;
+      objects.push({
+        apiName,
+        label: desc.label,
+        namespace: ns === "MANAERP" ? "MANAERP" : isCustom ? "Custom" : "Standard",
+        lastModified: "",
+        fieldCount: desc.fields.length,
+        isCustom,
+      });
+    } catch {
+      // describe 失敗はスキップ（権限不足等）
+      objects.push({
+        apiName,
+        label: apiName,
+        namespace: apiName.endsWith("__c") ? "Custom" : "Standard",
+        lastModified: "",
+        fieldCount: 0,
+        isCustom: apiName.endsWith("__c"),
+      });
+    }
+  }
+
+  await cacheSet(cacheKey, objects, CACHE_TTL_METADATA);
+  return objects;
+}
+
+// --- Describe ---
+
+async function handleDescribeObject(
+  hostname: string,
+  objectApiName: string,
+): Promise<{ fields: FieldInfo[] }> {
+  const session = await requireSession(hostname);
+  const cacheKey = buildCacheKey(hostname, "describe", objectApiName);
+  const cached = await cacheGet<{ fields: FieldInfo[] }>(cacheKey);
+  if (cached) return cached;
+
+  const desc = await describeObject(session, objectApiName);
+  const fields: FieldInfo[] = desc.fields.map((f) => ({
+    qualifiedApiName: `${objectApiName}.${f.name}`,
+    fieldApiName: f.name,
+    label: f.label,
+    dataType: f.type,
+    lastModified: "",
+    isCustom: f.custom,
+    namespace: f.name.includes("__") ? (f.name.split("__")[0] ?? null) : null,
+  }));
+
+  const data = { fields };
+  await cacheSet(cacheKey, data, CACHE_TTL_METADATA);
+  return data;
+}
+
+// --- フィールド権限 ---
 
 async function handleGetFieldPermissions(
   hostname: string,
@@ -209,18 +319,16 @@ async function handleGetFieldPermissions(
 ): Promise<FieldPermissionEntry[]> {
   const session = await requireSession(hostname);
   const cacheKey = buildCacheKey(
-    session.orgId || hostname,
+    hostname,
     "fieldPerms",
     `${objectApiName}:${permissionSetIds.sort().join(",")}`,
   );
-
   const cached = await cacheGet<FieldPermissionEntry[]>(cacheKey);
   if (cached) return cached;
 
   const soql = queryFieldPermissionsByObject(permissionSetIds, objectApiName);
   const result = await query<SfFieldPermission>(session, soql);
   const mapped = result.records.map(toFieldPermissionEntry);
-
   await cacheSet(cacheKey, mapped, CACHE_TTL_PERMISSIONS);
   return mapped;
 }
@@ -232,60 +340,21 @@ async function handleGetObjectPermissions(
 ): Promise<ObjectPermissionEntry[]> {
   const session = await requireSession(hostname);
   const cacheKey = buildCacheKey(
-    session.orgId || hostname,
+    hostname,
     "objPerms",
     `${objectApiName}:${permissionSetIds.sort().join(",")}`,
   );
-
   const cached = await cacheGet<ObjectPermissionEntry[]>(cacheKey);
   if (cached) return cached;
 
   const soql = queryObjectPermissionsByObject(permissionSetIds, objectApiName);
   const result = await query<SfObjectPermission>(session, soql);
   const mapped = result.records.map(toObjectPermissionEntry);
-
   await cacheSet(cacheKey, mapped, CACHE_TTL_PERMISSIONS);
   return mapped;
 }
 
-async function handleGetFieldDefinitions(
-  hostname: string,
-  objectApiName: string,
-): Promise<FieldInfo[]> {
-  const session = await requireSession(hostname);
-  const cacheKey = buildCacheKey(
-    session.orgId || hostname,
-    "fieldDefs",
-    objectApiName,
-  );
-
-  const cached = await cacheGet<FieldInfo[]>(cacheKey);
-  if (cached) return cached;
-
-  const soql = queryFieldDefinitions(objectApiName);
-  const result = await toolingQuery<SfFieldDefinition>(session, soql);
-  const mapped = result.records.map(toFieldInfo);
-
-  await cacheSet(cacheKey, mapped, CACHE_TTL_METADATA);
-  return mapped;
-}
-
-async function handleGetEntityDefinitions(hostname: string): Promise<ObjectInfo[]> {
-  const session = await requireSession(hostname);
-  const cacheKey = buildCacheKey(session.orgId || hostname, "entities", "all");
-
-  const cached = await cacheGet<ObjectInfo[]>(cacheKey);
-  if (cached) return cached;
-
-  const result = await toolingQuery<SfEntityDefinition>(
-    session,
-    QUERY_ENTITY_DEFINITIONS,
-  );
-  const mapped = result.records.map(toObjectInfo);
-
-  await cacheSet(cacheKey, mapped, CACHE_TTL_METADATA);
-  return mapped;
-}
+// --- 更新 ---
 
 async function handleUpdateFieldPermissions(
   hostname: string,
@@ -299,9 +368,7 @@ async function handleUpdateFieldPermissions(
 
   for (const entry of grouped.values()) {
     if (entry.id) {
-      const rec: { Id: string; PermissionsRead?: boolean; PermissionsEdit?: boolean } = {
-        Id: entry.id,
-      };
+      const rec: { Id: string; PermissionsRead?: boolean; PermissionsEdit?: boolean } = { Id: entry.id };
       if (entry.read !== undefined) rec.PermissionsRead = entry.read;
       if (entry.edit !== undefined) rec.PermissionsEdit = entry.edit;
       updates.push(rec);
@@ -320,41 +387,37 @@ async function handleUpdateFieldPermissions(
   let successCount = 0;
 
   if (updates.length > 0) {
-    const updateResults = await collectionUpdate(session, "FieldPermissions", updates);
-    for (let i = 0; i < updateResults.length; i++) {
-      const r = updateResults[i];
-      if (r && r.success) {
-        successCount++;
-      } else if (r) {
-        const firstError = r.errors[0];
+    const results = await collectionUpdate(session, "FieldPermissions", updates);
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      if (r?.success) successCount++;
+      else if (r) {
         errors.push({
           changeKey: updates[i]?.Id ?? `update-${i}`,
-          errorCode: firstError?.statusCode ?? "UNKNOWN",
-          message: firstError?.message ?? "不明なエラー",
+          errorCode: r.errors[0]?.statusCode ?? "UNKNOWN",
+          message: r.errors[0]?.message ?? "不明なエラー",
         });
       }
     }
   }
 
   if (creates.length > 0) {
-    const createResults = await collectionCreate(session, "FieldPermissions", creates);
-    for (let i = 0; i < createResults.length; i++) {
-      const r = createResults[i];
-      if (r && r.success) {
-        successCount++;
-      } else if (r) {
-        const firstError = r.errors[0];
+    const results = await collectionCreate(session, "FieldPermissions", creates);
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      if (r?.success) successCount++;
+      else if (r) {
         errors.push({
           changeKey: `create-${i}`,
-          errorCode: firstError?.statusCode ?? "UNKNOWN",
-          message: firstError?.message ?? "不明なエラー",
+          errorCode: r.errors[0]?.statusCode ?? "UNKNOWN",
+          message: r.errors[0]?.message ?? "不明なエラー",
         });
       }
     }
   }
 
-  await cacheDeleteByPrefix(`sf:${session.orgId || hostname}:fieldPerms:`);
-  await cacheDeleteByPrefix(`sf:${session.orgId || hostname}:objPerms:`);
+  await cacheDeleteByPrefix(`sf:${hostname}:fieldPerms:`);
+  await cacheDeleteByPrefix(`sf:${hostname}:objPerms:`);
 
   return {
     success: errors.length === 0,
@@ -365,12 +428,10 @@ async function handleUpdateFieldPermissions(
   };
 }
 
+// --- ユーティリティ ---
+
 async function handleClearCache(prefix?: string): Promise<{ cleared: boolean }> {
-  if (prefix) {
-    await cacheDeleteByPrefix(prefix);
-  } else {
-    await cacheDeleteByPrefix("sf:");
-  }
+  await cacheDeleteByPrefix(prefix ?? "sf:");
   return { cleared: true };
 }
 
@@ -380,9 +441,7 @@ async function handleSfHostDetected(
 ): Promise<{ ok: boolean }> {
   const apiHost = toApiHostname(sfHost);
   const data: Record<string, string> = { lastSfHost: apiHost };
-  if (currentObjectApiName) {
-    data.lastDetectedObject = currentObjectApiName;
-  }
+  if (currentObjectApiName) data.lastDetectedObject = currentObjectApiName;
   await chrome.storage.local.set(data);
   return { ok: true };
 }

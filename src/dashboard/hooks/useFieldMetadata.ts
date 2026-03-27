@@ -1,42 +1,32 @@
 /**
- * フィールド/エンティティメタデータ取得フック
- * ホスト名を各APIコールに渡す
+ * グループ → PS → オブジェクト フロー管理
  */
 
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback } from "react";
 import { usePermissionStore } from "../stores/permission-store";
 import {
-  getEntityDefinitions,
-  getFieldDefinitions,
-  getPermissionSets,
-  getDetectedObject,
+  getPsGroups,
+  getPsGroupComponents,
+  getPermissionSetsByIds,
+  getObjectsWithPermissions,
+  describeObjectFields,
 } from "../../lib/messaging";
 
 export function useFieldMetadata() {
   const { state, dispatch } = usePermissionStore();
   const hostname = state.session?.sfHost ?? null;
-  const autoSelectDone = useRef(false);
 
-  // 接続後にエンティティ一覧・権限セット一覧・検出オブジェクトを取得
+  // 接続後にグループ一覧を取得
   useEffect(() => {
     if (state.connectionStatus !== "connected" || !hostname) return;
 
     const load = async () => {
-      dispatch({ type: "SET_LOADING", loading: true, message: "オブジェクト一覧を取得中..." });
+      dispatch({ type: "SET_LOADING", loading: true, message: "権限セットグループを取得中..." });
       try {
-        const [objects, permissionSets, detected] = await Promise.all([
-          getEntityDefinitions(hostname),
-          getPermissionSets(hostname),
-          getDetectedObject(),
-        ]);
-        dispatch({ type: "SET_OBJECTS", objects });
-        dispatch({ type: "SET_PERMISSION_SETS", permissionSets });
-
-        if (detected.objectApiName) {
-          dispatch({ type: "SET_DETECTED_OBJECT", objectApiName: detected.objectApiName });
-        }
+        const groups = await getPsGroups(hostname);
+        dispatch({ type: "SET_PS_GROUPS", groups });
       } catch (err) {
-        console.error("メタデータ取得エラー:", err);
+        console.error("グループ取得エラー:", err);
         dispatch({
           type: "SET_CONNECTION_STATUS",
           status: "error",
@@ -50,46 +40,60 @@ export function useFieldMetadata() {
     void load();
   }, [state.connectionStatus, hostname, dispatch]);
 
-  // 検出オブジェクトが設定されたら自動選択（1回のみ）
-  useEffect(() => {
-    if (autoSelectDone.current) return;
-    if (
-      !state.detectedObjectApiName ||
-      state.selectedObjectApiName !== null ||
-      state.objects.length === 0 ||
-      state.loading ||
-      !hostname
-    ) return;
+  // グループ選択 → 含まれるPS取得
+  const selectGroup = useCallback(
+    async (groupId: string) => {
+      if (!hostname) return;
+      dispatch({ type: "SELECT_GROUP", groupId });
+      dispatch({ type: "SET_LOADING", loading: true, message: "権限セットを取得中..." });
+      try {
+        const { permissionSetIds } = await getPsGroupComponents(hostname, groupId);
+        const permissionSets = await getPermissionSetsByIds(hostname, permissionSetIds);
+        dispatch({ type: "SET_PERMISSION_SETS", permissionSets });
 
-    const exists = state.objects.some(
-      (o) => o.apiName === state.detectedObjectApiName,
-    );
-    if (exists) {
-      autoSelectDone.current = true;
-      // 直接dispatchしてloadFieldsForObjectのuseCallback依存を避ける
-      dispatch({ type: "SELECT_OBJECT", objectApiName: state.detectedObjectApiName });
-      dispatch({ type: "SET_LOADING", loading: true, message: "フィールド定義を取得中..." });
-      getFieldDefinitions(hostname, state.detectedObjectApiName)
-        .then((fields) => dispatch({ type: "SET_FIELDS", fields }))
-        .catch((err) => console.debug("自動選択フィールド取得エラー:", err))
-        .finally(() => dispatch({ type: "SET_LOADING", loading: false }));
-    }
-  }, [state.detectedObjectApiName, state.objects, state.selectedObjectApiName, state.loading, hostname, dispatch]);
+        // PS選択確定後、設定済みオブジェクトを取得
+        if (permissionSetIds.length > 0) {
+          dispatch({ type: "SET_LOADING", loading: true, message: "オブジェクト一覧を取得中..." });
+          const objects = await getObjectsWithPermissions(hostname, permissionSetIds);
+          dispatch({ type: "SET_OBJECTS", objects });
+        }
+      } catch (err) {
+        console.error("グループ詳細取得エラー:", err);
+      } finally {
+        dispatch({ type: "SET_LOADING", loading: false });
+      }
+    },
+    [hostname, dispatch],
+  );
 
+  // PS選択変更時にオブジェクト一覧を再取得
+  const refreshObjects = useCallback(
+    async (permissionSetIds: string[]) => {
+      if (!hostname || permissionSetIds.length === 0) return;
+      dispatch({ type: "SET_LOADING", loading: true, message: "オブジェクト一覧を取得中..." });
+      try {
+        const objects = await getObjectsWithPermissions(hostname, permissionSetIds);
+        dispatch({ type: "SET_OBJECTS", objects });
+      } catch (err) {
+        console.error("オブジェクト取得エラー:", err);
+      } finally {
+        dispatch({ type: "SET_LOADING", loading: false });
+      }
+    },
+    [hostname, dispatch],
+  );
+
+  // オブジェクト選択 → describe でフィールド取得
   const loadFieldsForObject = useCallback(
     async (objectApiName: string) => {
       if (!hostname) return;
       dispatch({ type: "SELECT_OBJECT", objectApiName });
-      dispatch({
-        type: "SET_LOADING",
-        loading: true,
-        message: "フィールド定義を取得中...",
-      });
+      dispatch({ type: "SET_LOADING", loading: true, message: "フィールド情報を取得中..." });
       try {
-        const fields = await getFieldDefinitions(hostname, objectApiName);
+        const { fields } = await describeObjectFields(hostname, objectApiName);
         dispatch({ type: "SET_FIELDS", fields });
       } catch (err) {
-        console.debug("フィールド定義取得エラー:", err);
+        console.error("フィールド取得エラー:", err);
       } finally {
         dispatch({ type: "SET_LOADING", loading: false });
       }
@@ -98,13 +102,16 @@ export function useFieldMetadata() {
   );
 
   return {
+    psGroups: state.psGroups,
+    selectedGroupId: state.selectedGroupId,
     objects: state.objects,
     fields: state.fields,
     permissionSets: state.permissionSets,
     selectedObjectApiName: state.selectedObjectApiName,
-    detectedObjectApiName: state.detectedObjectApiName,
     loading: state.loading,
     loadingMessage: state.loadingMessage,
+    selectGroup,
+    refreshObjects,
     loadFieldsForObject,
   };
 }

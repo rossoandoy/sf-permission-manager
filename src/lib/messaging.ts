@@ -1,8 +1,11 @@
 /**
  * Background Service Worker との型安全なメッセージング
- * sf-custom-config-tool パターン: Popup がホスト名を管理し、各リクエストに渡す
+ * グループ → PS → オブジェクト フロー対応
  */
 
+import type {
+  SfPermissionSetGroup,
+} from "../types/salesforce";
 import type {
   PermissionSetInfo,
   FieldPermissionEntry,
@@ -13,7 +16,6 @@ import type {
   PermissionChangeResult,
 } from "../types/permissions";
 
-/** バックグラウンドからのエラーレスポンス */
 interface ErrorResponse {
   error: string;
   code?: string;
@@ -44,41 +46,75 @@ function sendMessage<T>(message: Record<string, unknown>): Promise<T> {
   });
 }
 
-// --- 接続確認（ホスト名不要） ---
+// --- 接続 ---
 
-/** アクティブタブのURLからSFホスト名を解決 */
 export function getSfHost(url: string): Promise<{ sfHost: string | null }> {
-  return sendMessage<{ sfHost: string | null }>({
-    type: "GET_SF_HOST",
-    url,
-  });
+  return sendMessage<{ sfHost: string | null }>({ type: "GET_SF_HOST", url });
 }
 
-/** sid cookieの存在で接続状態を確認 */
 export function getStatus(): Promise<{ connected: boolean; hostname: string | null }> {
-  return sendMessage<{ connected: boolean; hostname: string | null }>({
-    type: "GET_STATUS",
-  });
+  return sendMessage<{ connected: boolean; hostname: string | null }>({ type: "GET_STATUS" });
 }
 
-/** 指定ホストのsid cookieを取得 */
-export function getSession(
+export function getSession(hostname: string): Promise<{ sessionId: string; hostname: string }> {
+  return sendMessage<{ sessionId: string; hostname: string }>({ type: "GET_SESSION", hostname });
+}
+
+// --- 権限セットグループ ---
+
+export function getPsGroups(hostname: string): Promise<SfPermissionSetGroup[]> {
+  return sendMessage<SfPermissionSetGroup[]>({ type: "GET_PS_GROUPS", hostname });
+}
+
+export function getPsGroupComponents(
   hostname: string,
-): Promise<{ sessionId: string; hostname: string }> {
-  return sendMessage<{ sessionId: string; hostname: string }>({
-    type: "GET_SESSION",
+  groupId: string,
+): Promise<{ permissionSetIds: string[] }> {
+  return sendMessage<{ permissionSetIds: string[] }>({
+    type: "GET_PS_GROUP_COMPONENTS",
     hostname,
+    groupId,
   });
 }
 
-// --- データ取得（ホスト名必須） ---
+// --- 権限セット ---
 
 export function getPermissionSets(hostname: string): Promise<PermissionSetInfo[]> {
-  return sendMessage<PermissionSetInfo[]>({
-    type: "GET_PERMISSION_SETS",
+  return sendMessage<PermissionSetInfo[]>({ type: "GET_PERMISSION_SETS", hostname });
+}
+
+export function getPermissionSetsByIds(
+  hostname: string,
+  ids: string[],
+): Promise<PermissionSetInfo[]> {
+  return sendMessage<PermissionSetInfo[]>({ type: "GET_PERMISSION_SETS_BY_IDS", hostname, ids });
+}
+
+// --- オブジェクト ---
+
+export function getObjectsWithPermissions(
+  hostname: string,
+  permissionSetIds: string[],
+): Promise<ObjectInfo[]> {
+  return sendMessage<ObjectInfo[]>({
+    type: "GET_OBJECTS_WITH_PERMISSIONS",
     hostname,
+    permissionSetIds,
   });
 }
+
+export function describeObjectFields(
+  hostname: string,
+  objectApiName: string,
+): Promise<{ fields: FieldInfo[] }> {
+  return sendMessage<{ fields: FieldInfo[] }>({
+    type: "DESCRIBE_OBJECT",
+    hostname,
+    objectApiName,
+  });
+}
+
+// --- 権限データ ---
 
 export function getFieldPermissions(
   hostname: string,
@@ -106,24 +142,6 @@ export function getObjectPermissions(
   });
 }
 
-export function getFieldDefinitions(
-  hostname: string,
-  objectApiName: string,
-): Promise<FieldInfo[]> {
-  return sendMessage<FieldInfo[]>({
-    type: "GET_FIELD_DEFINITIONS",
-    hostname,
-    objectApiName,
-  });
-}
-
-export function getEntityDefinitions(hostname: string): Promise<ObjectInfo[]> {
-  return sendMessage<ObjectInfo[]>({
-    type: "GET_ENTITY_DEFINITIONS",
-    hostname,
-  });
-}
-
 export function updateFieldPermissions(
   hostname: string,
   changes: BulkPermissionChange[],
@@ -135,15 +153,12 @@ export function updateFieldPermissions(
   });
 }
 
+// --- ユーティリティ ---
+
 export function clearCache(prefix?: string): Promise<{ cleared: boolean }> {
-  return sendMessage<{ cleared: boolean }>({
-    type: "CLEAR_CACHE",
-    prefix,
-  });
+  return sendMessage<{ cleared: boolean }>({ type: "CLEAR_CACHE", prefix });
 }
 
 export function getDetectedObject(): Promise<{ objectApiName: string | null }> {
-  return sendMessage<{ objectApiName: string | null }>({
-    type: "GET_DETECTED_OBJECT",
-  });
+  return sendMessage<{ objectApiName: string | null }>({ type: "GET_DETECTED_OBJECT" });
 }

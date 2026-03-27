@@ -3,8 +3,9 @@ import {
   escapeSoql,
   queryFieldPermissionsByObject,
   queryObjectPermissionsByObject,
-  queryFieldDefinitions,
+  queryDistinctObjectTypes,
   queryPermissionSetGroupComponents,
+  queryPermissionSetsByIds,
 } from "../../src/lib/sf-queries";
 
 describe("escapeSoql", () => {
@@ -58,11 +59,12 @@ describe("queryObjectPermissionsByObject", () => {
   });
 });
 
-describe("queryFieldDefinitions", () => {
-  it("Tooling API用のSOQLを生成する", () => {
-    const soql = queryFieldDefinitions("MANAERP__Bill_Item__c");
-    expect(soql).toContain("FROM FieldDefinition");
-    expect(soql).toContain("EntityDefinition.QualifiedApiName = 'MANAERP__Bill_Item__c'");
+describe("queryDistinctObjectTypes", () => {
+  it("GROUP BY でオブジェクト一覧を取得するSOQLを生成する", () => {
+    const soql = queryDistinctObjectTypes(["0PS001", "0PS002"]);
+    expect(soql).toContain("FROM ObjectPermissions");
+    expect(soql).toContain("GROUP BY SobjectType");
+    expect(soql).toContain("'0PS001'");
   });
 });
 
@@ -72,5 +74,14 @@ describe("queryPermissionSetGroupComponents", () => {
     expect(soql).toContain("FROM PermissionSetGroupComponent");
     expect(soql).toContain("'0PG001'");
     expect(soql).toContain("'0PG002'");
+  });
+});
+
+describe("queryPermissionSetsByIds", () => {
+  it("指定IDの権限セットを取得するSOQLを生成する", () => {
+    const soql = queryPermissionSetsByIds(["0PS001", "0PS002"]);
+    expect(soql).toContain("FROM PermissionSet");
+    expect(soql).toContain("'0PS001'");
+    expect(soql).toContain("'0PS002'");
   });
 });
