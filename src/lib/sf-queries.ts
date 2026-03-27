@@ -81,10 +81,9 @@ export function queryFieldDefinitions(objectApiName: string): string {
 
 /** エンティティ（オブジェクト）一覧取得（Tooling API経由） */
 export const QUERY_ENTITY_DEFINITIONS = `
-  SELECT QualifiedApiName, Label, IsCustom, NamespacePrefix, LastModifiedDate
+  SELECT QualifiedApiName, Label, NamespacePrefix, KeyPrefix
   FROM EntityDefinition
   WHERE IsQueryable = true
-    AND IsSearchable = true
   ORDER BY Label ASC
 `;
 

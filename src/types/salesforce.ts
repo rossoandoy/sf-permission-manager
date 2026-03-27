@@ -87,11 +87,8 @@ export interface SfFieldDefinition {
 export interface SfEntityDefinition {
   QualifiedApiName: string;
   Label: string;
-  IsCustom: boolean;
   NamespacePrefix: string | null;
-  LastModifiedDate: string;
-  /** Describe API 経由で取得するフィールド数 */
-  FieldCount?: number;
+  KeyPrefix: string | null;
 }
 
 // --- Composite API ---

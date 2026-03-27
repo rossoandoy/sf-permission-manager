@@ -72,13 +72,15 @@ export function toFieldInfo(sf: SfFieldDefinition): FieldInfo {
 
 export function toObjectInfo(sf: SfEntityDefinition): ObjectInfo {
   const ns = sf.NamespacePrefix;
+  // IsCustom はEntityDefinitionに存在しないため、API名の __c サフィックスで判定
+  const isCustom = sf.QualifiedApiName.endsWith("__c") || sf.QualifiedApiName.endsWith("__mdt") || sf.QualifiedApiName.endsWith("__e");
   return {
     apiName: sf.QualifiedApiName,
     label: sf.Label,
-    namespace: ns === "MANAERP" ? "MANAERP" : sf.IsCustom ? "Custom" : "Standard",
-    lastModified: sf.LastModifiedDate,
-    fieldCount: sf.FieldCount ?? 0,
-    isCustom: sf.IsCustom,
+    namespace: ns === "MANAERP" ? "MANAERP" : isCustom ? "Custom" : "Standard",
+    lastModified: "",
+    fieldCount: 0,
+    isCustom,
   };
 }
 
