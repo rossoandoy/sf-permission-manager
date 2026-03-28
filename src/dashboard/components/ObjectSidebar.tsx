@@ -11,6 +11,7 @@ interface ObjectSidebarProps {
   selectedGroupId: string | null;
   permissionSets: PermissionSetInfo[];
   selectedPermissionSetIds: string[];
+  onFetchRecordCounts: () => void;
   objects: ObjectInfo[];
   selectedObjectApiName: string | null;
   onSelectGroup: (groupId: string) => void;
@@ -23,6 +24,7 @@ export const ObjectSidebar: FC<ObjectSidebarProps> = ({
   selectedGroupId,
   permissionSets,
   selectedPermissionSetIds,
+  onFetchRecordCounts,
   objects,
   selectedObjectApiName,
   onSelectGroup,
@@ -31,7 +33,7 @@ export const ObjectSidebar: FC<ObjectSidebarProps> = ({
 }) => {
   const [objectFilter, setObjectFilter] = useState("");
   const [collapsed, setCollapsed] = useState(false);
-  const [sortBy, setSortBy] = useState<"label" | "apiName" | "fieldCount">("label");
+  const [sortBy, setSortBy] = useState<"label" | "apiName" | "fieldCount" | "recordCount">("label");
   const [nsFilter, setNsFilter] = useState<Record<string, boolean>>({
     MANAERP: true, Custom: true, Standard: true,
   });
@@ -60,14 +62,18 @@ export const ObjectSidebar: FC<ObjectSidebarProps> = ({
           o.label.toLowerCase().includes(lower),
       );
     }
-    // ソート（API名は不変なのでラベル順でもAPI名をセカンダリキーに使い安定化）
+    // ソート（API名は不変なのでセカンダリキーに使い安定化）
     return [...result].sort((a, b) => {
       if (sortBy === "label") {
         const cmp = a.label.localeCompare(b.label);
         return cmp !== 0 ? cmp : a.apiName.localeCompare(b.apiName);
       }
       if (sortBy === "apiName") return a.apiName.localeCompare(b.apiName);
-      // フィールド数降順、同数ならAPI名順で安定化
+      if (sortBy === "recordCount") {
+        const diff = b.recordCount - a.recordCount;
+        return diff !== 0 ? diff : a.apiName.localeCompare(b.apiName);
+      }
+      // フィールド数降順
       const diff = b.fieldCount - a.fieldCount;
       return diff !== 0 ? diff : a.apiName.localeCompare(b.apiName);
     });
@@ -186,12 +192,19 @@ export const ObjectSidebar: FC<ObjectSidebarProps> = ({
             </span>
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as "label" | "apiName" | "fieldCount")}
+              onChange={(e) => {
+                const val = e.target.value as "label" | "apiName" | "fieldCount" | "recordCount";
+                setSortBy(val);
+                if (val === "recordCount" && objects.some(o => o.recordCount < 0)) {
+                  onFetchRecordCounts();
+                }
+              }}
               className="text-[10px] bg-transparent text-zinc-500 border-none focus:outline-none cursor-pointer"
             >
               <option value="label">名前順</option>
               <option value="apiName">API名順</option>
               <option value="fieldCount">フィールド数順</option>
+              <option value="recordCount">レコード数順</option>
             </select>
           </div>
         </div>
@@ -228,7 +241,12 @@ export const ObjectSidebar: FC<ObjectSidebarProps> = ({
                       {obj.label}
                     </span>
                     <div className="text-[10px] text-zinc-500">{obj.apiName}</div>
-                    <div className="text-[10px] text-zinc-600">{obj.fieldCount} fields</div>
+                    <div className="text-[10px] text-zinc-600">
+                      {obj.fieldCount > 0 ? `${obj.fieldCount} fields` : ""}
+                      {obj.recordCount >= 0 && (
+                        <span className="ml-1 text-zinc-500">{obj.recordCount.toLocaleString()} records</span>
+                      )}
+                    </div>
                   </button>
                 );
               })}

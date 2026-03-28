@@ -199,6 +199,7 @@ export async function getObjectsWithPermissions(
       namespace: ns === "MANAERP" ? "MANAERP" : isCustom ? "Custom" : "Standard",
       lastModified: "",
       fieldCount: 0,
+      recordCount: -1,
       isCustom,
     };
   });
@@ -262,6 +263,25 @@ export async function describeObjectFields(
   const data = { fields, objectLabel: desc.label, fieldCount: desc.fields.length };
   await cacheSet(cacheKey, data, CACHE_TTL_METADATA);
   return data;
+}
+
+/**
+ * オブジェクトのレコード件数を取得
+ */
+export async function getRecordCount(
+  hostname: string,
+  objectApiName: string,
+): Promise<number> {
+  try {
+    const session = await requireSession(hostname);
+    const result = await query<{ expr0: number }>(
+      session,
+      `SELECT COUNT() FROM ${objectApiName}`,
+    );
+    return result.totalSize;
+  } catch {
+    return -1;
+  }
 }
 
 export async function getFieldPermissions(

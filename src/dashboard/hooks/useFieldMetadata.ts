@@ -9,6 +9,7 @@ import {
   getPsGroupComponents,
   getPermissionSetsByIds,
   getObjectsWithPermissions,
+  getRecordCount,
   describeObjectFields,
 } from "../../lib/messaging";
 
@@ -86,6 +87,31 @@ export function useFieldMetadata() {
     [hostname, dispatch],
   );
 
+  // レコード数を非同期で取得（ソートで「レコード数順」選択時に呼ばれる）
+  const fetchRecordCounts = useCallback(async () => {
+    if (!hostname || state.objects.length === 0) return;
+    // 並列5件ずつ取得
+    const batch = 5;
+    for (let i = 0; i < state.objects.length; i += batch) {
+      const slice = state.objects.slice(i, i + batch);
+      const counts = await Promise.all(
+        slice.map((o) => getRecordCount(hostname, o.apiName)),
+      );
+      for (let j = 0; j < slice.length; j++) {
+        const obj = slice[j];
+        const count = counts[j];
+        if (obj && count !== undefined && count >= 0) {
+          dispatch({
+            type: "UPDATE_OBJECT_META",
+            apiName: obj.apiName,
+            fieldCount: obj.fieldCount,
+            recordCount: count,
+          });
+        }
+      }
+    }
+  }, [hostname, state.objects, dispatch]);
+
   return {
     psGroups: state.psGroups,
     selectedGroupId: state.selectedGroupId,
@@ -97,5 +123,6 @@ export function useFieldMetadata() {
     loadingMessage: state.loadingMessage,
     selectGroup,
     loadFieldsForObject,
+    fetchRecordCounts,
   };
 }

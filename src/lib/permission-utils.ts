@@ -83,6 +83,7 @@ export function toObjectInfo(sf: SfEntityDefinition): ObjectInfo {
     namespace: ns === "MANAERP" ? "MANAERP" : isCustom ? "Custom" : "Standard",
     lastModified: "",
     fieldCount: 0,
+    recordCount: -1,
     isCustom,
   };
 }

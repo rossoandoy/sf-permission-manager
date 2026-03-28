@@ -29,6 +29,7 @@ const DashboardContent: FC = () => {
     loadingMessage,
     selectGroup,
     loadFieldsForObject,
+    fetchRecordCounts,
   } = useFieldMetadata();
   const {
     matrix,
@@ -129,6 +130,7 @@ const DashboardContent: FC = () => {
               onSelectGroup={selectGroup}
               onTogglePermissionSet={handleTogglePs}
               onSelectObject={loadFieldsForObject}
+              onFetchRecordCounts={fetchRecordCounts}
             />
 
             <div className="flex-1 flex flex-col min-w-0">

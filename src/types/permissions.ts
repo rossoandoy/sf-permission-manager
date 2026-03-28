@@ -7,6 +7,7 @@ export interface ObjectInfo {
   namespace: "Standard" | "MANAERP" | "Custom";
   lastModified: string;
   fieldCount: number;
+  recordCount: number;
   isCustom: boolean;
 }
 
