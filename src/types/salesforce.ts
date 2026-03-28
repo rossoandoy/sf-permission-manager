@@ -147,6 +147,9 @@ export interface SfDescribeField {
   custom: boolean;
   updateable: boolean;
   nillable: boolean;
+  permissionable: boolean;
+  calculated: boolean;
+  autoNumber: boolean;
   compoundFieldName: string | null;
 }
 

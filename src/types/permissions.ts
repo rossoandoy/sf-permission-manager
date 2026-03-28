@@ -21,6 +21,10 @@ export interface FieldInfo {
   lastModified: string;
   createdDate: string;
   isCustom: boolean;
+  /** FLS設定が可能か（false = 数式/自動番号/積み上げ集計等） */
+  permissionable: boolean;
+  /** 編集可能か（false = 数式/自動番号等） */
+  updateable: boolean;
   namespace: string | null;
 }
 

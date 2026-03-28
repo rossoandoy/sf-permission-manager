@@ -14,11 +14,12 @@ interface GapItem {
   fieldType: string;
   fieldCreatedDate: string;
   fieldLastModified: string;
+  /** Edit権限の設定が可能か（数式フィールド等はfalse） */
+  updateable: boolean;
   permissionSetId: string;
   permissionSetLabel: string;
   permissionSetLastModified: string;
   gapType: "missing" | "no_access";
-  /** フィールド作成がPS更新より後か */
   isNewerThanPs: boolean;
   daysDiff: number;
 }
@@ -56,7 +57,8 @@ export const GapDetectionView: FC<GapDetectionViewProps> = ({
     const result: GapItem[] = [];
 
     for (const field of matrix.fields) {
-      if (!field.isCustom) continue;
+      // カスタムフィールドかつFLS設定可能なもののみ対象
+      if (!field.isCustom || !field.permissionable) continue;
       for (const ps of matrix.permissionSets) {
         const perm = matrix.fieldPermissions[field.qualifiedApiName]?.[ps.id];
         const isMissing = !perm;
@@ -77,6 +79,7 @@ export const GapDetectionView: FC<GapDetectionViewProps> = ({
           fieldType: field.dataType,
           fieldCreatedDate: field.createdDate,
           fieldLastModified: field.lastModified,
+          updateable: field.updateable,
           permissionSetId: ps.id,
           permissionSetLabel: ps.label,
           permissionSetLastModified: ps.lastModified,
@@ -141,7 +144,7 @@ export const GapDetectionView: FC<GapDetectionViewProps> = ({
       {/* ロジック説明 */}
       <div className="px-4 py-2 bg-zinc-800/50 border-b border-zinc-700/30">
         <p className="text-[11px] text-zinc-400 leading-relaxed">
-          カスタムフィールドの FLS が
+          FLS設定可能なカスタムフィールド（数式・自動番号等を除く）で FLS が
           <strong className="text-red-300"> 未設定</strong> または
           <strong className="text-amber-300"> R/E共にOFF</strong> のものを検出。
           {newerCount > 0 && (
@@ -288,21 +291,25 @@ export const GapDetectionView: FC<GapDetectionViewProps> = ({
                         >
                           +R
                         </button>
-                        <button
-                          onClick={() => onTogglePermission(gap.fieldQualifiedName, gap.permissionSetId, "edit")}
-                          className="px-1.5 py-0.5 text-[9px] rounded bg-emerald-800/60 hover:bg-emerald-700 text-emerald-200 transition-colors"
-                        >
-                          +E
-                        </button>
-                        <button
-                          onClick={() => {
-                            onTogglePermission(gap.fieldQualifiedName, gap.permissionSetId, "read");
-                            onTogglePermission(gap.fieldQualifiedName, gap.permissionSetId, "edit");
-                          }}
-                          className="px-1.5 py-0.5 text-[9px] rounded bg-violet-800/60 hover:bg-violet-700 text-violet-200 transition-colors"
-                        >
-                          +R+E
-                        </button>
+                        {gap.updateable && (
+                          <button
+                            onClick={() => onTogglePermission(gap.fieldQualifiedName, gap.permissionSetId, "edit")}
+                            className="px-1.5 py-0.5 text-[9px] rounded bg-emerald-800/60 hover:bg-emerald-700 text-emerald-200 transition-colors"
+                          >
+                            +E
+                          </button>
+                        )}
+                        {gap.updateable && (
+                          <button
+                            onClick={() => {
+                              onTogglePermission(gap.fieldQualifiedName, gap.permissionSetId, "read");
+                              onTogglePermission(gap.fieldQualifiedName, gap.permissionSetId, "edit");
+                            }}
+                            className="px-1.5 py-0.5 text-[9px] rounded bg-violet-800/60 hover:bg-violet-700 text-violet-200 transition-colors"
+                          >
+                            +R+E
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

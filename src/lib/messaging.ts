@@ -219,12 +219,12 @@ export async function describeObjectFields(
   const desc = await describeObject(session, objectApiName);
 
   // CustomField から日付情報を取得（エラー時はスキップ）
-  let dateMap = new Map<string, { createdDate: string; lastModified: string }>();
+  // キー: DeveloperName（namespace なし、__c なし）
+  const dateMap = new Map<string, { createdDate: string; lastModified: string }>();
   try {
     const cfSoql = queryCustomFieldDates(objectApiName);
     const cfResult = await toolingQuery<SfCustomField>(session, cfSoql);
     for (const cf of cfResult.records) {
-      // DeveloperName は __c なしのAPI名
       dateMap.set(cf.DeveloperName, {
         createdDate: cf.CreatedDate,
         lastModified: cf.LastModifiedDate,
@@ -235,8 +235,15 @@ export async function describeObjectFields(
   }
 
   const fields: FieldInfo[] = desc.fields.map((f) => {
-    // CustomField の DeveloperName と照合（__c を除去）
-    const devName = f.name.replace(/__c$/, "").replace(/^[A-Za-z0-9]+__/, "");
+    // CustomField の DeveloperName と照合
+    // フィールド名: MANAERP__Application__c → namespace除去 → Application__c → __c除去 → Application
+    // フィールド名: MyField__c → MyField
+    let devName = f.name;
+    // namespace prefix を除去（例: MANAERP__Foo__c → Foo__c）
+    const nsParts = devName.match(/^[A-Za-z0-9]+__(.+)$/);
+    if (nsParts?.[1] && f.custom) devName = nsParts[1];
+    // __c サフィックスを除去
+    devName = devName.replace(/__c$/, "");
     const dates = dateMap.get(devName);
     return {
       qualifiedApiName: `${objectApiName}.${f.name}`,
@@ -246,6 +253,8 @@ export async function describeObjectFields(
       lastModified: dates?.lastModified ?? "",
       createdDate: dates?.createdDate ?? "",
       isCustom: f.custom,
+      permissionable: f.permissionable,
+      updateable: f.updateable,
       namespace: f.name.includes("__") ? (f.name.split("__")[0] ?? null) : null,
     };
   });
