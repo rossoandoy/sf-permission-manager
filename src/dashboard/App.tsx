@@ -175,7 +175,11 @@ const DashboardContent: FC = () => {
               )}
 
               {!loading && state.activeTab === "diff" && (
-                <DiffView matrix={matrix} allPermissionSets={permissionSets} />
+                <DiffView
+                  matrix={matrix}
+                  allPermissionSets={permissionSets}
+                  hostname={state.session?.sfHost ?? null}
+                />
               )}
 
               {!loading && !matrix && state.activeTab === "matrix" && (
